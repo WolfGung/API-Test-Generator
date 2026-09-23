@@ -84,7 +84,8 @@ def load_openapi(path: Path) -> ApiModel:
     document_security = doc.get("security")
     operations: list[Operation] = []
     taken_ids: set[str] = set()
-    security, notes = _security(components.get("securitySchemes") or {})
+    notes: list[str] = []
+    required_schemes: set[str] = set()  # the names of the schemes some operation is secured by
     for raw_path, item in (doc.get("paths") or {}).items():
         if not isinstance(item, dict):
             continue
@@ -96,6 +97,7 @@ def load_openapi(path: Path) -> ApiModel:
             own = [_parameter(p, components, notes, operation_id) for p in raw_op.get("parameters") or []]
             class_name = to_class_name(operation_id)
             requirements = raw_op.get("security", document_security)
+            required_schemes.update(name for r in requirements or [] if isinstance(r, dict) for name in r)
             operations.append(
                 Operation(
                     operation_id=operation_id,
@@ -112,6 +114,7 @@ def load_openapi(path: Path) -> ApiModel:
                     secured=bool(requirements) and any(bool(r) for r in requirements),
                 )
             )
+    security, security_notes = _security(components.get("securitySchemes") or {}, required_schemes)
     return ApiModel(
         title=str(info.get("title") or path.stem),
         version=str(info.get("version") or ""),
@@ -119,7 +122,7 @@ def load_openapi(path: Path) -> ApiModel:
         operations=tuple(operations),
         schemas=schemas,
         security=security,
-        notes=tuple(notes),
+        notes=(*security_notes, *notes),
     )
 
 
@@ -235,9 +238,11 @@ def _response(
     return Response(status=status, schema=schema or None, content_type=content_type, description=description)
 
 
-def _security(schemes: dict[str, Any]) -> tuple[Security, list[str]]:
+def _security(schemes: dict[str, Any], required: set[str]) -> tuple[Security, list[str]]:
     """The first supported scheme (bearer, basic, an API key in a header), with no notes; or no security and one
-    note per scheme the suite cannot send - an OAuth flow, digest, a key in a query string or a cookie."""
+    note per scheme the suite cannot send - an OAuth flow, digest, a key in a query string or a cookie - among
+    those in `required`, the ones some operation is secured by: a scheme merely declared secures nothing, so
+    there is nothing to say about it."""
     for name, scheme in schemes.items():
         kind = scheme.get("type")
         if kind == "http" and str(scheme.get("scheme", "")).lower() == "bearer":
@@ -247,7 +252,9 @@ def _security(schemes: dict[str, Any]) -> tuple[Security, list[str]]:
         if kind == "apiKey" and scheme.get("in") == "header":
             return Security(kind="apiKey", name=name, header=str(scheme["name"]), location="header"), []
     notes = [
-        UNSUPPORTED_SECURITY.format(what=f"{name} ({_describe(scheme)}) security") for name, scheme in schemes.items()
+        UNSUPPORTED_SECURITY.format(what=f"{name} ({_describe(scheme)}) security")
+        for name, scheme in schemes.items()
+        if name in required
     ]
     return NO_SECURITY, notes
 

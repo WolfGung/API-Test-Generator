@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
@@ -20,7 +21,7 @@ FORM_TYPES = {"urlencoded": "application/x-www-form-urlencoded", "formdata": "mu
 _VARIABLE = re.compile(r"\{\{([^{}]+)\}\}")
 _COLON_SEGMENT = re.compile(r"(?<=/):([A-Za-z_][A-Za-z0-9_]*)")
 _PATH_PARAM = re.compile(r"\{([^{}/]+)\}")
-_PATH_START = re.compile(r"[/?]")  # where the path (or a bare query) begins after a host label
+_ORIGIN_LABEL = re.compile(r"(?:://)?[^/?]*")  # what follows a leading variable up to the path (or a bare query)
 SUPPORTED_AUTH = ("bearer", "basic", "apiKey")
 
 
@@ -49,11 +50,19 @@ def load_postman(path: Path) -> ApiModel:
         parsed = _url(request.get("url"), variables)
         if parsed is None:
             continue
-        origin, raw_path, query, path_examples = parsed
-        base_url = base_url or origin
+        raw_path, path_examples = parsed.path, parsed.path_examples
         method = str(request.get("method") or "GET").upper()
         operation_id = unique(to_identifier(str(item.get("name") or f"{method} {raw_path}")), taken)
         class_name = to_class_name(operation_id)
+        notes += [f"{operation_id}: {note}" for note in parsed.notes]
+        if base_url and parsed.origin and parsed.origin != base_url:
+            # One origin per suite: the first the collection names. A request on another host goes there too,
+            # which the client should hear rather than find out from a 404.
+            notes.append(
+                f"{operation_id}: sent to {base_url}, not to {parsed.origin}: a suite has one base URL, the first "
+                "the collection names"
+            )
+        base_url = base_url or parsed.origin
         effective = _auth(request.get("auth")) or auth
         if security is NO_SECURITY and effective.kind in SUPPORTED_AUTH:
             security = effective
@@ -66,7 +75,7 @@ def load_postman(path: Path) -> ApiModel:
         ]
         parameters += [
             Parameter(name=key, location="query", required=False, schema={"type": "string"}, examples=(value,))
-            for key, value in query
+            for key, value in parsed.query
         ]
         parameters += list(_headers(request.get("header"), variables, notes, operation_id))
         operations.append(
@@ -142,10 +151,23 @@ def _substitute(text: str, variables: dict[str, str]) -> str:
     return _VARIABLE.sub(lambda m: variables.get(m.group(1).strip(), m.group(0)), text)
 
 
-def _url(raw: Any, variables: dict[str, str]) -> tuple[str, str, list[tuple[str, str]], dict[str, str]] | None:
-    """(origin, path with {params}, query pairs, path parameter examples) or None for an empty URL."""
+@dataclass(frozen=True)
+class _Url:
+    """A request's URL taken apart. `notes` says what was not kept - a host label folded into the origin, a
+    query value the collection cannot resolve - as sentences the caller prefixes with the operation's id."""
+
+    origin: str  # "" when the collection leaves it to the suite's base URL
+    path: str  # with {params}
+    query: tuple[tuple[str, str], ...]
+    path_examples: dict[str, str]
+    notes: tuple[str, ...] = ()
+
+
+def _url(raw: Any, variables: dict[str, str]) -> _Url | None:
+    """The URL of a request, or None for an empty one."""
     path_examples: dict[str, str] = {}
     structured: list[tuple[str, str]] | None = None
+    notes: list[str] = []
     if isinstance(raw, dict):
         for variable in raw.get("variable") or []:
             if isinstance(variable, dict) and variable.get("key"):
@@ -154,7 +176,12 @@ def _url(raw: Any, variables: dict[str, str]) -> tuple[str, str, list[tuple[str,
         if entries:
             # Postman's own structured form of the query, the one that carries the `disabled` flags: the raw
             # string keeps a switched-off entry, and where the two disagree the entries are what Postman sends.
-            structured = [_query_pair(q, variables) for q in entries if not q.get("disabled")]
+            # A null value is blank.
+            structured = [
+                (str(q["key"]), _substitute(str(q.get("value") or ""), variables))
+                for q in entries
+                if not q.get("disabled")
+            ]
         text = raw.get("raw")
         if not text:
             host = raw.get("host") or []
@@ -173,33 +200,44 @@ def _url(raw: Any, variables: dict[str, str]) -> tuple[str, str, list[tuple[str,
     leading_variable = _VARIABLE.match(text)
     if leading_variable:
         # An unresolved {{variable}} in host position (Postman's own {{baseUrl}}-style convention, usually
-        # supplied by an environment file this collection does not carry) is not a path parameter: the whole
-        # label it starts - `{{env}}.api.example.com`, `{{host}}:8080`, `{{scheme}}://{{host}}` - is the origin,
-        # dropped as a whole and left for the generated suite's own base URL to supply.
+        # supplied by an environment file this collection does not carry) is not a path parameter: it is the
+        # origin, dropped and left for the generated suite's own base URL to supply. What follows it up to the
+        # first `/` is part of that origin only when it looks like a host label - it holds a `.` or a `:`, as in
+        # `{{env}}.api.example.com`, `{{host}}:8080` or `{{scheme}}://{{host}}`; otherwise it is the first path
+        # segment (`{{baseUrl}}api/things`, with a `baseUrl` that ends in `/`) and stays in the path.
         rest = text[leading_variable.end() :]
-        boundary = _PATH_START.search(rest)
-        text = rest[boundary.start() :] if boundary else ""
+        matched = _ORIGIN_LABEL.match(rest)
+        label = matched.group(0) if matched else ""
+        if "." in label or ":" in label:
+            folded = text[: leading_variable.end()] + label
+            notes.append(f"{folded!r} is not part of the path; it is the origin, which API_BASE_URL supplies")
+            rest = rest[len(label) :]
+        text = rest
         no_origin = True
-    # Unknown {{name}} elsewhere becomes {name}: in the path that is a genuine parameter.
-    text = _VARIABLE.sub(lambda m: "{" + m.group(1).strip() + "}", text)
     text = _COLON_SEGMENT.sub(lambda m: "{" + m.group(1) + "}", text)
     if not no_origin and "://" not in text and not text.startswith("/"):
         # No scheme still means something over the wire: Postman itself sends this request as http.
         text = f"http://{text}"
     parts = urlsplit(text)
     origin = "" if no_origin else (f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else "")
-    path = parts.path or "/"
+    # An unknown {{name}} in the path becomes {name}: there it is a genuine parameter.
+    path = _VARIABLE.sub(lambda m: "{" + m.group(1).strip() + "}", parts.path or "/")
     if not path.startswith("/"):
         path = "/" + path
-    query = structured if structured is not None else parse_qsl(parts.query, keep_blank_values=True)
-    return origin, path, query, path_examples
+    pairs = structured if structured is not None else parse_qsl(parts.query, keep_blank_values=True)
+    query = tuple(pair for pair in pairs if _query_value_resolves(pair, notes))
+    return _Url(origin=origin, path=path, query=query, path_examples=path_examples, notes=tuple(notes))
 
 
-def _query_pair(entry: dict[str, Any], variables: dict[str, str]) -> tuple[str, str]:
-    """One enabled `url.query` entry as (key, value): a null value is blank, and an unknown {{name}} becomes
-    {name}, as it does in a raw URL."""
-    value = _substitute(str(entry.get("value") or ""), variables)
-    return str(entry["key"]), _VARIABLE.sub(lambda m: "{" + m.group(1).strip() + "}", value)
+def _query_value_resolves(pair: tuple[str, str], notes: list[str]) -> bool:
+    """The header rule, for a query pair: a value still holding a {{name}} the collection cannot resolve is not
+    sent at all - `{{trace}}` is never a query value - and a note says so."""
+    key, value = pair
+    unresolved = _VARIABLE.search(value)
+    if unresolved is None:
+        return True
+    notes.append(f"query parameter {key!r} is not sent; {unresolved.group(0)} is not a collection variable")
+    return False
 
 
 def _headers(raw: Any, variables: dict[str, str], notes: list[str], operation_id: str) -> Iterator[Parameter]:

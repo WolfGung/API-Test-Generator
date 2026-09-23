@@ -389,3 +389,80 @@ def test_a_body_mode_the_loader_does_not_know_is_written_skipped(tmp_path):
     [only] = cases_for(api.operations[0], api)
     assert only.skip_reason == "request body is graphql (a Postman body mode), which the generator does not produce"
     assert only.body is None
+
+
+@pytest.mark.parametrize(
+    "url, path, query, notes",
+    [
+        ("{{baseUrl}}/things", "/things", [], ()),
+        ("{{baseUrl}}api/things?x=1", "/api/things", [("x", "1")], ()),
+        (
+            "{{env}}.api.example.com/things", "/things", [],
+            ("op: '{{env}}.api.example.com' is not part of the path; it is the origin, which API_BASE_URL supplies",),
+        ),
+        (
+            "{{host}}:8080/things", "/things", [],
+            ("op: '{{host}}:8080' is not part of the path; it is the origin, which API_BASE_URL supplies",),
+        ),
+        (
+            "{{scheme}}://{{host}}/things", "/things", [],
+            ("op: '{{scheme}}://{{host}}' is not part of the path; it is the origin, which API_BASE_URL supplies",),
+        ),
+    ],
+)
+def test_text_after_a_leading_variable_is_the_origin_only_when_it_looks_like_a_host_label(
+    tmp_path, url, path, query, notes
+):
+    """`{{baseUrl}}api/things` with `baseUrl = https://x.example/` is the path `/api/things`: `api` holds no `.`
+    or `:`, so it is the first path segment, not a host label. A label that does look like one is folded into
+    the origin, and a note names what was folded; the plain `{{baseUrl}}/things` folds nothing and says nothing."""
+    api = _load_url(tmp_path, url)
+    assert api.base_url == ""
+    assert api.operations[0].path == path
+    assert query_of(api) == query
+    assert api.notes == notes
+
+
+def test_a_query_value_holding_an_unresolved_variable_is_dropped_with_a_note(tmp_path):
+    """The header rule, for the query: `{{trace}}` is never a query value, whether the entry comes from `url.query`
+    or from the raw URL alone."""
+    trace_note = "get_thing: query parameter 'trace' is not sent; {{trace}} is not a collection variable"
+    structured = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {
+            "method": "GET",
+            "url": {
+                "raw": "https://api.example.com/things?trace={{trace}}&x=1&k={{known}}",
+                "query": [
+                    {"key": "trace", "value": "{{trace}}"},
+                    {"key": "x", "value": "1"},
+                    {"key": "k", "value": "{{known}}"},
+                ],
+            },
+        },
+    }], name="structured")
+    assert query_of(structured) == [("x", "1"), ("k", "resolved")]
+    assert structured.notes == (trace_note,)
+    raw = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {"method": "GET", "url": "https://api.example.com/things?trace={{trace}}&x=1&k={{known}}"},
+    }], name="raw")
+    assert query_of(raw) == [("x", "1"), ("k", "resolved")]
+    assert raw.notes == (trace_note,)
+
+
+def test_a_request_on_another_host_is_folded_onto_the_first_origin_with_a_note(tmp_path):
+    """A suite has one base URL, the first origin the collection names; a request on another host still goes
+    there, and the note says which request and which host."""
+    api = _load_items(tmp_path, [
+        {"name": "Ping", "request": {"method": "GET", "url": "https://api.example.com/ping"}},
+        {"name": "Pong", "request": {"method": "GET", "url": "https://other.example.com:8443/pong"}},
+        {"name": "Relative", "request": {"method": "GET", "url": "{{baseUrl}}/relative"}},
+        {"name": "Same", "request": {"method": "GET", "url": "https://api.example.com/same"}},
+    ])
+    assert api.base_url == "https://api.example.com"
+    assert [op.path for op in api.operations] == ["/ping", "/pong", "/relative", "/same"]
+    assert api.notes == (
+        "pong: sent to https://api.example.com, not to https://other.example.com:8443: "
+        "a suite has one base URL, the first the collection names",
+    )

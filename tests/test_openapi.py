@@ -241,7 +241,8 @@ def test_an_unsupported_security_scheme_leaves_a_note_and_no_credentials(tmp_pat
     assert oauth.security.kind == "none"
     assert oauth.notes == ("main (oauth2) security is not supported; the suite sends no credentials",)
     schemes = "    main: {type: apiKey, in: query, name: key}\n    other: {type: http, scheme: digest}"
-    two = load_text(tmp_path, "two.yaml", SECURED.replace("{schemes}", schemes))
+    both_required = SECURED.replace("security: [{main: []}]", "security: [{main: []}, {other: []}]")
+    two = load_text(tmp_path, "two.yaml", both_required.replace("{schemes}", schemes))
     assert two.security.kind == "none"
     assert two.notes == (
         "main (apiKey in query) security is not supported; the suite sends no credentials",
@@ -271,3 +272,18 @@ def test_a_cookie_parameter_is_dropped_with_a_note_naming_it(small, tmp_path):
         "/things/{id}: cookie parameter 'session' is not supported and is not sent",
         "get_thing: cookie parameter 'theme' is not supported and is not sent",
     )
+
+
+def test_a_declared_but_unused_unsupported_scheme_leaves_no_note(tmp_path):
+    """`securitySchemes` may declare an OAuth flow no operation requires; nothing is secured by it, so there is
+    nothing the suite cannot do, and no note. Requiring it somewhere - at document level, unless every operation
+    opts out - brings the note back."""
+    oauth = SECURED.replace("{schemes}", "    main: {type: oauth2, flows: {}}")
+    unused = load_text(tmp_path, "unused.yaml", oauth.replace("security: [{main: []}]\n", ""))
+    assert unused.security.kind == "none"
+    assert [op.secured for op in unused.operations] == [False]
+    assert unused.notes == ()
+    used = load_text(tmp_path, "used.yaml", oauth)
+    assert used.notes == ("main (oauth2) security is not supported; the suite sends no credentials",)
+    opted_out = oauth.replace("      operationId: listThings\n", "      operationId: listThings\n      security: []\n")
+    assert load_text(tmp_path, "opted_out.yaml", opted_out).notes == ()
