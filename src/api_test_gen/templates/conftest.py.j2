@@ -1,0 +1,59 @@
+"""Fixtures for the suite generated from {{ source_name }} ({{ title }}{% if version %} {{ version }}{% endif %}).
+
+API_BASE_URL points the suite at a server; the default below is the document's.
+{% if security.kind == "bearer" %}
+API_TOKEN is the bearer token the secured operations send.
+{% elif security.kind == "basic" %}
+API_USERNAME and API_PASSWORD are the credentials the secured operations send.
+{% elif security.kind == "apiKey" %}
+API_KEY is the key the secured operations send in the {{ security.header }} header.
+{% endif %}
+API_TIMEOUT is the request timeout in seconds (default 10).
+"""
+
+{% if security.kind == "basic" %}
+import base64
+{% endif %}
+import os
+
+import httpx
+import pytest
+
+BASE_URL = os.environ.get("API_BASE_URL", {{ base_url | literal }})
+TIMEOUT = float(os.environ.get("API_TIMEOUT", "10"))
+MARKERS = {{ markers | literal }}
+
+
+def pytest_configure(config):
+    for marker in MARKERS:
+        config.addinivalue_line("markers", marker)
+
+
+@pytest.fixture(scope="session")
+def client():
+    with httpx.Client(base_url=BASE_URL, timeout=TIMEOUT) as client:
+        yield client
+
+
+@pytest.fixture(scope="session")
+def auth_headers():
+    """Credentials for the secured operations, from the environment."""
+{% if security.kind == "bearer" %}
+    token = os.environ.get("API_TOKEN")
+    if not token:
+        pytest.skip("API_TOKEN is not set; the secured operations need a bearer token")
+    return {"Authorization": f"Bearer {token}"}
+{% elif security.kind == "basic" %}
+    username, password = os.environ.get("API_USERNAME"), os.environ.get("API_PASSWORD")
+    if not username or password is None:
+        pytest.skip("API_USERNAME and API_PASSWORD are not set; the secured operations need them")
+    credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {credentials}"}
+{% elif security.kind == "apiKey" %}
+    key = os.environ.get("API_KEY")
+    if not key:
+        pytest.skip("API_KEY is not set; the secured operations need it")
+    return {{ '{' }}{{ security.header | literal }}: key}
+{% else %}
+    return {}
+{% endif %}

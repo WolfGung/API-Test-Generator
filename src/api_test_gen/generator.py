@@ -1,0 +1,102 @@
+"""Generate a suite: fixtures, models, one module per tag, a README; then count what was written."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
+
+from .cases import cases_for
+from .ir import ApiModel
+from .models import class_names, generate_models
+from .naming import plural, to_identifier, unique
+from .render import render_conftest, render_module, render_readme
+
+FIXED_FILES = ("conftest.py", "models.py", "README.md")
+ENV_HINTS = {
+    "bearer": ["API_TOKEN=..."],
+    "basic": ["API_USERNAME=...", "API_PASSWORD=..."],
+    "apiKey": ["API_KEY=..."],
+    "none": [],
+}
+
+
+class OutputExists(RuntimeError):
+    """The output directory already has files in it and overwriting was not asked for."""
+
+
+@dataclass(frozen=True)
+class Summary:
+    operations: int
+    tests: int
+    modules: tuple[str, ...]
+    skipped: tuple[str, ...]  # "<operation_id>: <reason>" for every positive case that is written skipped
+
+
+def generate(
+    api: ApiModel,
+    out: Path,
+    *,
+    source_name: str,
+    base_url: str | None = None,
+    overwrite: bool = False,
+    include_tags: Iterable[str] = (),
+    exclude_tags: Iterable[str] = (),
+) -> Summary:
+    if out.exists() and any(out.iterdir()):
+        if not overwrite:
+            raise OutputExists(f"{out} is not empty; pass --overwrite to replace the generated files in it")
+        for stale in out.iterdir():
+            if stale.is_file() and (
+                stale.name in FIXED_FILES or (stale.name.startswith("test_") and stale.suffix == ".py")
+            ):
+                stale.unlink()
+    include, exclude = set(include_tags), set(exclude_tags)
+    operations = [op for op in api.operations if (not include or op.tag in include) and op.tag not in exclude]
+    tags: list[str] = []
+    for operation in operations:
+        if operation.tag not in tags:
+            tags.append(operation.tag)
+    taken: set[str] = set()
+    markers = {tag: unique(to_identifier(tag), taken) for tag in tags}
+    names = class_names(api.schemas)
+    files: dict[str, str] = {}
+    modules: list[str] = []
+    skipped: list[str] = []
+    tests = 0
+    for tag in tags:
+        per_operation = [(op, cases_for(op, api)) for op in operations if op.tag == tag]
+        cases = [case for _, found in per_operation for case in found]
+        tests += len(cases)
+        skipped += [
+            f"{op.operation_id}: {case.skip_reason}"
+            for op, found in per_operation
+            for case in found
+            if case.skip_reason
+        ]
+        module = f"test_{markers[tag]}.py"
+        files[module] = render_module(
+            tag=tag, marker=markers[tag], cases=cases, model_names=names, operations=len(per_operation),
+            source_name=source_name,
+        )
+        modules.append(module)
+    files["conftest.py"] = render_conftest(
+        api, source_name=source_name, base_url=api.base_url if base_url is None else base_url,
+        markers=list(markers.values()),
+    )
+    if api.schemas:
+        files["models.py"] = generate_models(api, source_name)
+    files["README.md"] = render_readme(
+        api,
+        source_name=source_name,
+        summary_lines=[
+            f"{plural(len(operations), 'operation')}, {plural(tests, 'test')} in {plural(len(modules), 'module')}."
+        ],
+        env_lines=["API_BASE_URL=...", *ENV_HINTS.get(api.security.kind, [])],
+        modules=modules,
+        out_hint=out.name or ".",
+    )
+    out.mkdir(parents=True, exist_ok=True)
+    for name, content in files.items():
+        (out / name).write_text(content, encoding="utf-8")
+    return Summary(operations=len(operations), tests=tests, modules=tuple(modules), skipped=tuple(skipped))

@@ -1,0 +1,31 @@
+# Tests generated from {{ source_name }}
+
+{{ title }}{% if version %} {{ version }}{% endif %}: {{ summary_lines | join("\n") }}
+
+## Run
+
+```bash
+pip install pytest httpx pydantic
+{{ env_lines | join(" ") }} pytest {{ out_hint }}
+```
+
+{% if security.kind != "none" %}
+Without credentials the secured operations are skipped, not failed, so a run
+without them still tells you what the unsecured surface does.
+
+{% endif %}
+## What is here
+
+- `conftest.py`: the HTTP client, the credentials fixture and the marker registration.
+{% if has_models %}
+- `models.py`: one Pydantic model per named schema; the tests validate success responses with them.
+{% endif %}
+{% for module in modules %}
+- `{{ module }}`
+{% endfor %}
+
+Every test names its operation in its docstring. Each operation has a positive
+case built from the document's examples, defaults and enums, one negative case
+per required query or header parameter and per required body field, and, where
+the operation is secured, a case without credentials. Edit freely: the generator
+only writes these files again with `--overwrite`.
