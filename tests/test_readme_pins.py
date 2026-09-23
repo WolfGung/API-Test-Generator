@@ -26,8 +26,8 @@ from tests.helpers import collected
 from tools.examples import EXAMPLES, REPO, Example, regenerate
 
 README = (REPO / "README.md").read_text(encoding="utf-8")
-FIRST_SCREEN = README[: README.index("\n## Try it\n")]
 SOURCE = REPO / "src" / "api_test_gen"
+CREDENTIALS = ("API_BASE_URL", "API_TOKEN", "API_KEY", "API_USERNAME", "API_PASSWORD")  # what a generated suite reads
 NUMBER_WORDS = {"one": 1, "two": 2, "both": 2, "three": 3, "four": 4, "five": 5}
 MOST_WORDS = 25  # what a sentence on the first screen may have at most
 
@@ -63,6 +63,13 @@ def bare_word(text: str, word: str) -> bool:
     return re.search(rf"\b{re.escape(word)}\b", text) is not None
 
 
+def first_screen() -> str:
+    """The page up to the `Try it` heading: the title, one sentence, the badges, the table and the bullets."""
+    end = README.find("\n## Try it\n")
+    assert end != -1, "the README no longer has the `## Try it` heading that ends the first screen"
+    return README[:end]
+
+
 @pytest.fixture(scope="module")
 def fresh(tmp_path_factory) -> dict[str, Summary]:
     """Every example generated again, into a scratch directory: the numbers the table has to show."""
@@ -71,17 +78,30 @@ def fresh(tmp_path_factory) -> dict[str, Summary]:
 
 
 def test_the_first_screen_is_title_sentence_badges_table_and_bullets_in_short_sentences():
+    screen = first_screen()
     landmarks = (
         "# API Test Generator\n", "[![CI](", "## What a document becomes", "\n| Document |", "## What this shows"
     )
-    positions = [README.index(mark) for mark in landmarks]
-    assert positions == sorted(positions), "the first screen: title, one sentence, badges, the table, the bullets"
+    positions = [screen.find(mark) for mark in landmarks]
+    assert -1 not in positions and positions == sorted(positions), (
+        "the first screen: title, one sentence, badges, the table, the bullets"
+    )
     assert README.startswith("# API Test Generator\n\n"), "the page opens with its title"
-    tagline = README.split("\n\n")[1]
+    tagline, after = README.split("\n\n")[1:3]
     assert "\n" not in tagline and tagline.endswith(".") and ". " not in tagline, "one sentence under the title"
-    bullets = FIRST_SCREEN[FIRST_SCREEN.index("## What this shows") :].count("\n- ")
-    assert 2 <= bullets <= 3, "two or three bullets of what this shows"
-    prose = [line for line in FIRST_SCREEN.splitlines() if line and not line.startswith(("#", "|", "[!["))]
+    assert after.startswith("[![CI]("), "the badges follow the sentence directly"
+    lines = screen.splitlines()
+    badges = [index for index, line in enumerate(lines) if line.startswith("[![")]
+    heading = lines.index("## What a document becomes")
+    assert badges == list(range(badges[0], badges[-1] + 1)) and badges[-1] < heading, "one block of badges"
+    assert not any(lines[badges[-1] + 1 : heading]), "nothing between the badges and the table's heading"
+    rows = [index for index, line in enumerate(lines) if line.startswith("|")]
+    bullets = [index for index, line in enumerate(lines) if line.startswith("- ")]
+    assert rows and bullets and rows[-1] < bullets[0], "the table stands before the bullets"
+    between = [line for line in lines[rows[-1] + 1 : bullets[0]] if line]
+    assert between == ["## What this shows"], f"between the table and the bullets only their heading, not {between}"
+    assert 2 <= len(bullets) <= 3, "two or three bullets of what this shows"
+    prose = [line for line in lines if line and not line.startswith(("#", "|", "[!["))]
     text = re.sub(r"\]\([^)]*\)", "]", " ".join(prose)).replace("**", "")  # link targets and emphasis are not words
     for sentence in re.split(r"(?<=[.!?])\s+", text):
         words = sentence.split()
@@ -154,7 +174,8 @@ def test_the_live_proof_is_described_as_the_live_test_runs_it():
     failing = pinned(r"exactly the (\d+) secured operations fail", "how many operations a wrong token fails")
     positives = set(test_live.SECURED_POSITIVES.values())
     assert {int(failing.group(1))} == positives, f"the secured positives of each suite: {test_live.SECURED_POSITIVES}"
-    assert pinned(r"\(those (\d+) and their negatives are skipped\)", "what a run without a token skips")
+    skipped = pinned(r"\(those (\d+) and their negatives are skipped\)", "what a run without a token skips")
+    assert int(skipped.group(1)) == int(failing.group(1)), "what fails with a wrong token is what skips without one"
     assert int(failing.group(1)) == min(test_live.NEED_THE_TOKEN.values()), "a suite without negatives skips those"
 
 
@@ -247,6 +268,19 @@ def test_the_status_codes_and_constraints_named_are_the_ones_in_the_code():
         assert not bare_word(sampling, keyword), f"the page says the sampler ignores {keyword}, but samples.py names it"
     for keyword in re.findall(r"`(\w+)`", line.group(2)):
         assert f'"{keyword}"' in sampling, f"the page says the sampler honours {keyword}, but samples.py does not"
+
+
+def test_the_environment_variables_named_are_the_ones_the_generated_conftest_reads():
+    template = (SOURCE / "templates" / "conftest.py.j2").read_text(encoding="utf-8")
+    line = pinned(
+        r"^`conftest\.py` holds the HTTP client and the credentials fixture: (.+?)\. `models\.py`",
+        "the environment variables a generated suite reads",
+    )
+    named = set(re.findall(r"`(API_[A-Z_]+)`", line.group(1)))
+    assert named == set(CREDENTIALS), f"the page names {sorted(named)}, the generated conftest reads {CREDENTIALS}"
+    for name in CREDENTIALS:
+        pinned(rf"`{name}`", f"the environment variable {name}")
+        assert f'os.environ.get("{name}"' in template, f"the page names {name}; the generated conftest never reads it"
 
 
 def test_the_generated_suite_needs_what_the_page_says_and_not_the_generator():

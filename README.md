@@ -15,12 +15,10 @@ A command-line tool that turns an OpenAPI 3 document or a Postman collection int
 | `fixtures/petstore-openapi3.json` | OpenAPI 3.0 | 19 | 33 (1 skipped) | 3 | petstore3.swagger.io, nightly |
 | `fixtures/postman-echo.postman_collection.json` | Postman v2.0 | 22 | 23 (1 skipped) | 7 | generated and collected only |
 
-Each suite has one positive test per operation and a check without credentials for every secured operation. A required query or header parameter, or a required body field, gets a negative test that leaves it out. Documented JSON responses are validated against Pydantic models. An operation whose body the generator does not produce gets a test written `skip`, with the reason in it. The four suites are committed under [`examples/`](examples/) exactly as the generator writes them. `tests/test_examples.py` regenerates each and refuses a difference; `tests/test_readme_pins.py` refuses this page when a number moves.
-
 ## What this shows
 
 - **Moving Postman collections to pytest.** The collection exported from the sample API becomes a suite that runs green against it. Folders become modules; saved responses become response models.
-- **An API test suite for an existing backend, from its document.** The suite generated from the sample API's OpenAPI document runs against that API on every push. A wrong token must fail exactly the secured operations.
+- **An API test suite for an existing backend, from its document.** The suite generated from the sample API's OpenAPI document runs against that API on every push. A wrong token fails exactly the secured operations, and nothing else.
 - **Readable code you keep editing.** One module per tag, one function per case, every value traceable to the document, `ruff` clean. A generated suite needs pytest, httpx and Pydantic, not the generator.
 
 ## Try it
@@ -83,6 +81,8 @@ The generator reads OpenAPI 3.0 and 3.1 documents (YAML or JSON, `$ref` within t
 - **One negative case per required query or header parameter and per required top-level body field:** the same request with that one thing left out, expected to answer 4xx.
 - **A case without credentials** where the operation is secured, expected to answer 401 or 403.
 
+An operation with a form, multipart or binary body gets a test marked `skip`, with the reason in it. The four suites are committed under [`examples/`](examples/) exactly as the generator writes them. `tests/test_examples.py` regenerates each and refuses a difference; `tests/test_readme_pins.py` refuses this page when a number moves.
+
 `conftest.py` holds the HTTP client and the credentials fixture: `API_BASE_URL` points the suite at a server, and `API_TOKEN`, `API_KEY` or `API_USERNAME`/`API_PASSWORD` carry the credentials, without which the secured operations are skipped rather than failed. `models.py` holds one Pydantic model per named schema, with `extra="forbid"` where the document closes the schema and an alias wherever a property name cannot be a Python field name. A Postman collection has no schemas, so the model of a response is inferred from the saved example response, types only; and since a collection says nothing about which fields are required, no missing-field negative comes from one, and the suite's own README says so.
 
 ## What is not generated
@@ -96,7 +96,7 @@ The generator reads OpenAPI 3.0 and 3.1 documents (YAML or JSON, `$ref` within t
 
 ## How the proof is run
 
-`make test` runs the generator's own tests: the loaders against small documents and the two public ones, the model generator (the generated source is imported and used), the renderer, the command line, the committed examples against fresh generation, and then both sample-API suites as a client would run them — `pytest` in a subprocess against the sample API served in-process. Each suite runs three ways: with the token (everything passes), with a wrong token (exactly the 4 secured operations fail), without one (those 4 and their negatives are skipped). Nothing in `make test` reaches the network.
+`make test` runs the generator's own tests: the loaders against small documents and the two public ones, the model generator (the generated source is imported and used), the renderer, the command line, the committed examples against fresh generation, and then both sample-API suites as a client would run them. That last part is `pytest` in a subprocess against the sample API served in-process. Each suite runs three ways: with the token (everything passes), with a wrong token (exactly the 4 secured operations fail), without one (those 4 and their negatives are skipped). Nothing in `make test` reaches the network.
 
 CI does the same on every push, and once a night runs the Petstore suite against `petstore3.swagger.io`; the same job can be started by hand. That job is allowed to fail: the public Petstore is shared writable state, and a red there is information about the server, not about the generator.
 
@@ -126,7 +126,7 @@ Four more repositories from the same portfolio:
 - **[Toolshop-Test-Automation-Framework](https://github.com/WolfGung/Toolshop-Test-Automation-Framework)** — a test automation framework built from scratch for an online shop: API, browser and end-to-end cases against a public demo shop or a local Docker stand, with test design documents.
 - **[Marketplace-Test-Automation-Framework](https://github.com/WolfGung/Marketplace-Test-Automation-Framework)** — API and browser tests for a marketplace shop, run against a small stand shipped in the repository with a nightly drift check of the public demo site, a smoke set, video and traces per browser test and a published Allure report.
 - **[Web-Scraping-Automation-Framework](https://github.com/WolfGung/Web-Scraping-Automation-Framework)** — a scraper that collects two practice sites and a demo store of its own, over HTTP and through a browser, detects changes between nightly runs and publishes the data, the change report and the test report.
-- **[Test-Suite-Rescue](https://github.com/WolfGung/Test-Suite-Rescue)** — a deliberately sick test suite, its cured version with the same coverage on Playwright and on Selenium, and the measured difference between them: twenty runs of each against the same application, reproducible with one command.
+- **[Test-Suite-Rescue](https://github.com/WolfGung/Test-Suite-Rescue)** — a deliberately sick test suite, its cured version with the same coverage on Playwright and on Selenium, and the measured difference between them against the same application, reproducible with one command.
 
 ## Hire me
 
