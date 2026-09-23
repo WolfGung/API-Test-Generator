@@ -347,3 +347,20 @@ def test_what_the_page_says_is_not_generated_is_dropped_with_a_note(tmp_path):
     assert api.security.kind == "none", "a key in a cookie leaves the suite without credentials"
     assert any("security is not supported" in note for note in api.notes), "the loader notes the scheme"
     assert any("cookie parameter" in note for note in api.notes), "the loader notes the cookie parameter"
+
+
+def test_the_project_metadata_says_what_the_badges_and_the_lint_claim_say():
+    """The MIT badge, the Python badge and the CI badge's repository are also what pyproject.toml declares; and
+    "ruff clean" is the full rule set: no file is excused from a rule, the examples included."""
+    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    project = pyproject["project"]
+    assert project["license"] == "MIT", "the licence the badge names, as an SPDX expression"
+    assert project["license-files"] == ["LICENSE"], "the licence file the badge links"
+    python = pinned(r"^\[!\[Python ([\d.]+)\]", "the Python badge").group(1)
+    classifiers = set(project["classifiers"])
+    assert f"Programming Language :: Python :: {python}" in classifiers, "the Python version the badge shows"
+    assert "Topic :: Software Development :: Testing" in classifiers, "what the tool is for"
+    repository = pinned(r"^\[!\[CI\]\((https://github\.com/[^/]+/[^/]+)/actions/", "the CI badge's repository").group(1)
+    assert project["urls"]["Repository"] == repository, "the repository the CI badge points at"
+    assert "per-file-ignores" not in pyproject["tool"]["ruff"]["lint"], "no file is excused from a ruff rule"
+    pinned(r"`ruff` clean", "the lint claim")
