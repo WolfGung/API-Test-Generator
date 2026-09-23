@@ -15,13 +15,12 @@ from typing import Any
 
 import httpx
 
-from .app import TOKEN, app, reset
+from .app import SAMPLE_TOKEN, TOKEN, app, reset
 from .serve import serving
 
 TARGET = Path(__file__).with_name("bookshelf.postman_collection.json")
 SCHEMA = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 BASE_URL = "http://127.0.0.1:8000"
-SAMPLE_TOKEN = "sample-token"  # the app's default token, the only one the committed collection may carry
 _PLACEHOLDER = re.compile(r"\{([^{}/]+)\}")
 
 

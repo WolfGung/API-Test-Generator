@@ -20,7 +20,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
-TOKEN = os.environ.get("SAMPLE_API_TOKEN", "sample-token")
+SAMPLE_TOKEN = "sample-token"  # the default token; the only one the committed Postman collection may carry
+TOKEN = os.environ.get("SAMPLE_API_TOKEN", SAMPLE_TOKEN)
 
 
 class Author(BaseModel):

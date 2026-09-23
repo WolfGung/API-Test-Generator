@@ -1,12 +1,15 @@
 """The Postman collection of the sample API: exported from the app, committed, and read back by the loader."""
 
+import ast
 import json
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 
 from api_test_gen.openapi import load_openapi
 from api_test_gen.postman import load_postman
+from sample_api import app as app_module
 from sample_api import export, postman
 from sample_api.app import app
 
@@ -130,3 +133,17 @@ def test_the_loader_reads_it_into_the_same_operations_with_bearer_security():
     assert [(op.method, op.path, op.tag, op.secured) for op in api.operations] == [
         (op.method, op.path, op.tag, op.secured) for op in from_document.operations
     ]
+
+
+def test_the_sample_token_is_spelled_once_in_the_app_and_imported_by_the_exporter():
+    """The guard compares the token the app runs with against the one sample token; two spellings of that
+    token would drift apart without either test noticing, so the app holds it as `SAMPLE_TOKEN` and the
+    exporter imports it."""
+    def spellings(module: str) -> int:
+        tree = ast.parse((Path(postman.__file__).parent / f"{module}.py").read_text(encoding="utf-8"))
+        return sum(isinstance(node, ast.Constant) and node.value == "sample-token" for node in ast.walk(tree))
+
+    assert spellings("app") == 1
+    assert spellings("postman") == 0
+    assert postman.SAMPLE_TOKEN is app_module.SAMPLE_TOKEN == "sample-token"
+    assert app_module.TOKEN == app_module.SAMPLE_TOKEN  # the default the tests and the examples rely on
