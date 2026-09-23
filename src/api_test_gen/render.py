@@ -10,7 +10,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from .cases import Case
+from .cases import Case, declares_required
 from .ir import ApiModel
 from .naming import plural, to_identifier, unique
 
@@ -322,5 +322,5 @@ def render_readme(
     return template.render(
         source_name=source_name, title=api.title, version=api.version, security=api.security,
         summary_lines=summary_lines, env_lines=env_lines, modules=modules,
-        has_models=bool(api.schemas), out_hint=out_hint,
+        has_models=bool(api.schemas), out_hint=out_hint, declares_required=declares_required(api),
     )

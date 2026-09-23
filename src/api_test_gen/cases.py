@@ -63,6 +63,19 @@ def cases_for(operation: Operation, api: ApiModel) -> list[Case]:
     return cases
 
 
+def declares_required(api: ApiModel) -> bool:
+    """Whether the document justifies any missing-parameter or missing-field negative, by the rule `cases_for`
+    applies: an operation with a required query or header parameter, or a JSON body whose schema requires a
+    field. Path parameters are always required and get no negative; a Postman collection declares nothing as
+    required, so its suite has none of these negatives and its README says so."""
+    for operation in api.operations:
+        if any(p.required and p.location in ("query", "header") for p in operation.parameters):
+            return True
+        if operation.body and operation.body.is_json and required_fields(operation.body.schema, api):
+            return True
+    return False
+
+
 def _value(parameter: Parameter, api: ApiModel) -> Any:
     return parameter.examples[0] if parameter.examples else sample_for(parameter.schema, api)
 

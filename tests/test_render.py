@@ -4,9 +4,11 @@ import warnings
 import pytest
 
 from api_test_gen.cases import Case
-from api_test_gen.ir import ApiModel, Security
-from api_test_gen.render import docstring, literal, render_conftest, render_module
-from tests.helpers import ruff_check
+from api_test_gen.ir import ApiModel, Body, Operation, Parameter, Security, ref_to
+from api_test_gen.openapi import load_openapi
+from api_test_gen.postman import load_postman
+from api_test_gen.render import docstring, literal, render_conftest, render_module, render_readme
+from tests.helpers import REPO, ruff_check
 
 
 def test_literal_is_flat_when_it_fits_and_expanded_when_it_does_not():
@@ -277,3 +279,90 @@ def test_a_long_title_and_base_url_keep_the_conftest_lint_clean(tmp_path):
     assert ast.literal_eval(assigned["BASE_URL"].args[1]) == base_url
     assert ast.literal_eval(assigned["MARKERS"]) == markers
     assert ast.get_docstring(module, clean=False).startswith("Fixtures for the suite generated from s.yaml (TTT")
+
+
+def readme_text(api: ApiModel) -> str:
+    """The README generated for `api`, as one line: its paragraphs are hard-wrapped."""
+    text = render_readme(
+        api, source_name="d.json", summary_lines=["1 operation, 1 test in 1 module."],
+        env_lines=["API_BASE_URL=..."], modules=["test_default.py"], out_hint="out",
+    )
+    return " ".join(text.split())
+
+
+NEGATIVES = "one negative case per required query or header parameter and per required body field"
+NO_NEGATIVES = (
+    "This document declares no required query or header parameter and no required field of a JSON body "
+    "(a Postman collection never does), so there is no missing-parameter or missing-field negative."
+)
+REQUIRING = {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}
+REQUIRING_NOTHING = {"type": "object", "properties": {"name": {"type": "string"}}}
+ID = Parameter(name="id", location="path", required=True, schema={"type": "integer"})
+
+
+def operation(**overrides) -> Operation:
+    base = dict(operation_id="op", method="POST", path="/things/{id}", tag="default", summary="One thing")
+    return Operation(**{**base, **overrides})
+
+
+def json_body(schema: dict, *examples) -> Body:
+    return Body(content_type="application/json", schema=schema, required=True, examples=examples)
+
+
+def api_with(*operations: Operation, schemas: dict | None = None) -> ApiModel:
+    return ApiModel(title="T", version="1", base_url="", operations=operations, schemas=schemas or {})
+
+
+@pytest.mark.parametrize(
+    "api, promises_negatives",
+    [
+        pytest.param(
+            api_with(operation(parameters=(ID, Parameter(name="q", location="query", required=True, schema={})))),
+            True, id="required query parameter",
+        ),
+        pytest.param(
+            api_with(operation(parameters=(Parameter(name="X-Reader", location="header", required=True, schema={}),))),
+            True, id="required header",
+        ),
+        pytest.param(
+            api_with(operation(body=json_body(ref_to("Thing"))), schemas={"Thing": REQUIRING}),
+            True, id="required field behind a reference",
+        ),
+        pytest.param(
+            api_with(operation(body=json_body({"allOf": [ref_to("Thing")]})), schemas={"Thing": REQUIRING}),
+            True, id="required field of an allOf part",
+        ),
+        pytest.param(
+            api_with(
+                operation(
+                    parameters=(
+                        ID,
+                        Parameter(name="q", location="query", required=False, schema={}, examples=("x",)),
+                        Parameter(name="X-Trace", location="header", required=False, schema={}, examples=("t",)),
+                    ),
+                    body=json_body(ref_to("Thing"), {"name": "x"}),
+                ),
+                schemas={"Thing": REQUIRING_NOTHING},
+            ),
+            False, id="what a collection yields: path parameters, optional values, a body requiring nothing",
+        ),
+        pytest.param(
+            api_with(operation(body=Body(content_type="multipart/form-data", schema=REQUIRING, required=True))),
+            False, id="a form body requiring a field: the operation is written skipped, no negative comes of it",
+        ),
+        pytest.param(api_with(), False, id="no operations"),
+    ],
+)
+def test_the_readme_promises_negatives_only_where_the_document_declares_something_required(api, promises_negatives):
+    text = readme_text(api)
+    assert (NEGATIVES in text) is promises_negatives, text
+    assert (NO_NEGATIVES in text) is not promises_negatives, text
+
+
+def test_the_sample_api_documents_render_one_branch_each():
+    """The OpenAPI document of the sample API requires parameters and fields; the collection exported from it
+    describes the same operations but, like any Postman collection, declares nothing as required."""
+    from_document = readme_text(load_openapi(REPO / "sample_api" / "openapi.json"))
+    from_collection = readme_text(load_postman(REPO / "sample_api" / "bookshelf.postman_collection.json"))
+    assert NEGATIVES in from_document and NO_NEGATIVES not in from_document
+    assert NO_NEGATIVES in from_collection and NEGATIVES not in from_collection

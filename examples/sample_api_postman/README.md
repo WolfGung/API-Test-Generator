@@ -24,9 +24,11 @@ without them still tells you what the unsecured surface does.
 - `test_loans.py`
 
 Every test names its operation in its docstring. Each operation has a positive
-case built from the document's examples, defaults and enums, one negative case
-per required query or header parameter and per required body field, and, where
-the operation is secured, a case without credentials. Edit freely: the generator
+case built from the document's examples, defaults and enums and, where the
+operation is secured, a case without credentials. This document declares no
+required query or header parameter and no required field of a JSON body (a
+Postman collection never does), so there is no missing-parameter or
+missing-field negative. Edit freely: the generator
 only writes these files again with `--overwrite`. With `--overwrite` every
 `test_*.py` in the directory is replaced, including files you added; keep your
 own tests under another name.
