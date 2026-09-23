@@ -48,7 +48,9 @@ def generate_models(api: ApiModel, source_name: str) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-RESERVED = {"Any", "Literal", "BaseModel", "ConfigDict", "Field", "TypeAdapter"}
+# Names a class must not take: what the module imports, and the constants a schema called `none` or `true`
+# would otherwise shadow (`class None` is a SyntaxError).
+RESERVED = {"Any", "Literal", "BaseModel", "ConfigDict", "Field", "TypeAdapter", "None", "True", "False"}
 
 # Field names that would shadow something Pydantic's own machinery needs: an annotation builtin used in a type
 # expression, or an attribute BaseModel itself defines. Written out rather than read from `dir(BaseModel)` so the
@@ -128,7 +130,9 @@ def _hoist(
 
 
 def _literal(value: Any) -> str:
-    return json.dumps(value) if isinstance(value, str) else repr(value)
+    """A string as a double-quoted literal written as itself (`ensure_ascii` would turn a character outside the
+    BMP into a surrogate pair, which is another string in Python source); anything else as its repr."""
+    return json.dumps(value, ensure_ascii=False) if isinstance(value, str) else repr(value)
 
 
 _STRING_LITERAL = re.compile(r'"(?:[^"\\]|\\.)*"')
@@ -228,9 +232,10 @@ class _Writer:
             nullable = nullable or len(kinds) < len(schema["type"])
             exprs = list(dict.fromkeys(self.type_of({**schema, "type": kind}) for kind in kinds))
             expr = " | ".join(exprs) if exprs else self.any()
-        elif "enum" in schema:
-            values = [v for v in schema["enum"] if v is not None]
-            nullable = nullable or len(values) < len(schema["enum"])
+        elif "enum" in schema or "const" in schema:
+            declared = schema["enum"] if "enum" in schema else [schema["const"]]
+            values = [v for v in declared if v is not None]
+            nullable = nullable or len(values) < len(declared)
             self.typing_used.add("Literal")
             expr = f"Literal[{', '.join(_literal(v) for v in values)}]" if values else self.any()
         else:
@@ -300,14 +305,14 @@ class _Writer:
                     fields.append(f"    {field_name}: {type_expr}")
                 else:
                     self.pydantic_used.add("Field")
-                    fields.append(f"    {field_name}: {type_expr} = Field(alias={json.dumps(alias)})")
+                    fields.append(f"    {field_name}: {type_expr} = Field(alias={_literal(alias)})")
             else:
                 optional = type_expr if type_expr.endswith("| None") else f"{type_expr} | None"
                 if alias is None:
                     fields.append(f"    {field_name}: {optional} = None")
                 else:
                     self.pydantic_used.add("Field")
-                    fields.append(f"    {field_name}: {optional} = Field(default=None, alias={json.dumps(alias)})")
+                    fields.append(f"    {field_name}: {optional} = Field(default=None, alias={_literal(alias)})")
         if aliased:
             config.append("populate_by_name=True")
         if needs_open_namespaces:

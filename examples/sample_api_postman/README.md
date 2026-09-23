@@ -29,6 +29,7 @@ operation is secured, a case without credentials. This document declares no
 required query or header parameter and no required field of a JSON body (a
 Postman collection never does), so there is no missing-parameter or
 missing-field negative. Edit freely: the generator
-only writes these files again with `--overwrite`. With `--overwrite` every
-`test_*.py` in the directory is replaced, including files you added; keep your
-own tests under another name.
+only writes these files again with `--overwrite`. With `--overwrite` the
+generator replaces `README.md`, `conftest.py`, `models.py` and every `test_*.py`
+in the directory, including files you added; keep your own tests under another
+name.

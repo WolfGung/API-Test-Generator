@@ -38,15 +38,18 @@ def sample_for(schema: dict[str, Any], api: ApiModel, depth: int = 0, expanding:
             return None  # a cycle through this reference: no finite sample to offer
         expanding = expanding | {name}
     schema = api.resolve(schema)
-    for key in ("example", "default", "const"):
-        if key in schema:
-            return schema[key]
+    # The document's example wins: `example`, the first of `examples`, then `default` and `const`, then the enum.
+    if "example" in schema:
+        return schema["example"]
     examples = schema.get("examples")
     if isinstance(examples, list) and examples:
         return examples[0]
     if isinstance(examples, dict) and examples:
         first = next(iter(examples.values()))
         return first.get("value", first) if isinstance(first, dict) else first
+    for key in ("default", "const"):
+        if key in schema:
+            return schema[key]
     if schema.get("enum"):
         return schema["enum"][0]
     if "allOf" in schema:

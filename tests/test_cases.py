@@ -187,3 +187,23 @@ def test_an_optional_parameter_is_sent_when_the_document_gives_it_a_value(tmp_pa
     [positive] = cases_for(api.operations[0], api)  # every parameter is optional, so there are no negatives
     assert positive.query == {"author": 1, "limit": 10, "page": 3, "q": "given"}
     assert positive.headers == {"X-Mode": "fast"}
+
+
+def test_header_values_are_written_json_style_not_as_python_reprs():
+    """A boolean header example must go out as `true`, a number as its digits: `str(True)` is `True`, which no
+    server reads as a boolean."""
+    op = Operation(
+        operation_id="flags", method="GET", path="/flags", tag="t", summary="",
+        parameters=(
+            Parameter(name="X-Dry", location="header", required=True, schema={"type": "boolean"}, examples=(True,)),
+            Parameter(name="X-Off", location="header", required=False, schema={"type": "boolean"}, examples=(False,)),
+            Parameter(name="X-Count", location="header", required=True, schema={"type": "integer"}, examples=(5,)),
+            Parameter(name="X-Ratio", location="header", required=True, schema={"type": "number"}, examples=(1.5,)),
+            Parameter(name="X-Name", location="header", required=True, schema={"type": "string"}, examples=("x",)),
+            Parameter(name="X-Sampled", location="header", required=True, schema={"type": "boolean"}),
+        ),
+    )
+    positive = cases_for(op, API)[0]
+    assert positive.headers == {
+        "X-Dry": "true", "X-Off": "false", "X-Count": "5", "X-Ratio": "1.5", "X-Name": "x", "X-Sampled": "true",
+    }

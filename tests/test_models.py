@@ -424,3 +424,51 @@ def test_a_required_that_is_not_a_list_is_a_document_error_naming_the_schema():
     )
     with pytest.raises(SpecError, match="schema 'Thing': 'required' must be a list of property names, not True"):
         generate_models(api, "required.yaml")
+
+
+def test_a_schema_named_like_a_builtin_constant_and_non_bmp_enum_values_import(tmp_path):
+    """A schema called `none` would become `class None`, a SyntaxError; an enum value outside the BMP (an emoji)
+    must be written as itself, not as the surrogate pair `json.dumps` writes by default, which is a different
+    string; a property named with one gets the same treatment in its alias."""
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={
+            "none": {"type": "object", "properties": {"true": {"type": "string"}, "🐍": {"type": "integer"}}},
+            "false": {"type": "string", "enum": ["😀", "plain"]},
+            "Truth": {"type": "object", "properties": {"value": {"$ref": "#/components/schemas/false"}}},
+        },
+    )
+    source = generate_models(api, "constants.yaml")
+    path = tmp_path / "models.py"
+    path.write_text(source, encoding="utf-8")
+    assert ruff_check(path) == ""
+    assert "class None(" not in source and "class None_2(BaseModel):" in source
+    assert "class False(" not in source and 'False_2 = Literal["😀", "plain"]' in source
+    assert "\\ud83d" not in source and 'alias="🐍"' in source
+    models = load_module(path)
+    assert models.Truth.model_validate({"value": "😀"}).value == "😀"
+    assert models.None_2.model_validate({"🐍": 1}).model_dump(by_alias=True) == {"true": None, "🐍": 1}
+
+
+def test_a_const_becomes_a_literal(tmp_path):
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={
+            "Event": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": {"kind": {"const": "created"}, "version": {"const": 2}, "gone": {"const": None}},
+            },
+        },
+    )
+    source = generate_models(api, "const.yaml")
+    path = tmp_path / "models.py"
+    path.write_text(source)
+    assert ruff_check(path) == ""
+    assert '    kind: Literal["created"]\n' in source
+    assert "    version: Literal[2] | None = None\n" in source
+    assert "    gone: Any | None = None\n" in source
+    models = load_module(path)
+    assert models.Event.model_validate({"kind": "created", "version": 2}).version == 2
+    with pytest.raises(ValidationError):
+        models.Event.model_validate({"kind": "deleted"})

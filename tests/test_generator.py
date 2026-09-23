@@ -44,8 +44,8 @@ def test_generates_a_module_per_tag_and_counts_what_it_wrote(bookish, tmp_path):
     readme = " ".join((out / "README.md").read_text().split())  # the README wraps its paragraphs
     assert "Needs Python 3.12 or newer: `models.py` may use `type` statements for recursive aliases." in readme
     assert (
-        "With `--overwrite` every `test_*.py` in the directory is replaced, including files you added; "
-        "keep your own tests under another name."
+        "With `--overwrite` the generator replaces `README.md`, `conftest.py`, `models.py` and every `test_*.py` "
+        "in the directory, including files you added; keep your own tests under another name."
     ) in readme
 
 
@@ -121,7 +121,7 @@ def test_no_schemas_means_no_models_module(tmp_path):
     assert "    assert response.status_code == 204, response.text[:300]\n" in (out / "test_default.py").read_text()
     assert ruff_check(out) == ""
     readme = " ".join((out / "README.md").read_text().split())
-    assert "Needs Python 3.12 or newer." in readme and "models.py" not in readme
+    assert "Needs Python 3.12 or newer." in readme and "- `models.py`" not in readme  # not listed as written
 
 
 @pytest.mark.parametrize(

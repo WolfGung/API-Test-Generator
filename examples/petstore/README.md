@@ -26,6 +26,7 @@ Every test names its operation in its docstring. Each operation has a positive
 case built from the document's examples, defaults and enums, one negative case
 per required query or header parameter and per required body field, and, where
 the operation is secured, a case without credentials. Edit freely: the generator
-only writes these files again with `--overwrite`. With `--overwrite` every
-`test_*.py` in the directory is replaced, including files you added; keep your
-own tests under another name.
+only writes these files again with `--overwrite`. With `--overwrite` the
+generator replaces `README.md`, `conftest.py`, `models.py` and every `test_*.py`
+in the directory, including files you added; keep your own tests under another
+name.

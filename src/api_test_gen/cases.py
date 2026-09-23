@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, replace
 from typing import Any
@@ -80,6 +81,12 @@ def _value(parameter: Parameter, api: ApiModel) -> Any:
     return parameter.examples[0] if parameter.examples else sample_for(parameter.schema, api)
 
 
+def _header_text(value: Any) -> str:
+    """A header value as text: a string as it is, anything else JSON-style - `true`, `5`, `1.5` - rather than
+    Python's `True`, which no server reads as a boolean."""
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+
+
 def _given(parameter: Parameter, api: ApiModel) -> bool:
     """Whether the positive request carries the parameter: a required one always, an optional one when the
     document gives it a value (an example on the parameter or its schema, a default, a const), as body fields."""
@@ -98,7 +105,7 @@ def _positive(operation: Operation, api: ApiModel, taken: set[str]) -> Case:
     for name in PLACEHOLDER.findall(operation.path):  # a placeholder the document never declared
         path_params.setdefault(name, "string")
     query = {p.name: _value(p, api) for p in operation.parameters_in("query") if _given(p, api)}
-    headers = {p.name: str(_value(p, api)) for p in operation.parameters_in("header") if _given(p, api)}
+    headers = {p.name: _header_text(_value(p, api)) for p in operation.parameters_in("header") if _given(p, api)}
     body: Any = None
     body_kind: str | None = None
     skip_reason: str | None = None

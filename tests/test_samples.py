@@ -31,13 +31,17 @@ def sample(schema):
     return sample_for(schema, API)
 
 
-def test_document_values_win_in_order_example_default_enum():
+def test_document_values_win_in_order_example_examples_default_const_enum():
+    """The document's example wins: `example`, then the first of `examples`, then `default`, then `const`, then
+    the first enum value; a default is what the server assumes, not what a client shows."""
     assert sample({"type": "string", "example": "e", "default": "d", "enum": ["x"]}) == "e"
-    assert sample({"type": "string", "default": "d", "enum": ["x"]}) == "d"
+    assert sample({"type": "string", "example": "e", "examples": ["s"]}) == "e"
+    assert sample({"type": "integer", "examples": [4, 5], "default": 7, "const": 8}) == 4
+    assert sample({"type": "integer", "examples": {"one": {"value": 6}}, "default": 7}) == 6
+    assert sample({"type": "string", "default": "d", "const": "c", "enum": ["x"]}) == "d"
+    assert sample({"const": "fixed", "enum": ["x"]}) == "fixed"
     assert sample({"type": "string", "enum": ["x", "y"]}) == "x"
-    assert sample({"type": "integer", "examples": [4, 5]}) == 4
-    assert sample({"type": "integer", "examples": {"one": {"value": 6}}}) == 6
-    assert sample({"const": "fixed"}) == "fixed"
+    assert sample({"type": "integer", "examples": [], "default": 7}) == 7  # an empty list is no example
 
 
 def test_type_based_values_and_formats():
