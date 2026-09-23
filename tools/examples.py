@@ -40,6 +40,10 @@ EXAMPLES = (
         "postman_echo", "postman", "fixtures/postman-echo.postman_collection.json", None,
         "generated and collected only",
     ),
+    Example(
+        "sample_api_postman", "postman", "sample_api/bookshelf.postman_collection.json", "http://127.0.0.1:8000",
+        "the sample API, on every push",
+    ),
 )
 
 

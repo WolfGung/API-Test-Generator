@@ -77,6 +77,10 @@ SEED_BOOKS = (
 
 class Store:
     def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        """The shelf as the process started: the seed authors and books, no loans."""
         self.authors = {author.id: author for author in SEED_AUTHORS}
         self.books = {book.id: book.model_copy() for book in SEED_BOOKS}
         self.loans: dict[int, Loan] = {}
@@ -86,6 +90,12 @@ class Store:
 
 store = Store()
 bearer = HTTPBearer(auto_error=False)
+
+
+def reset() -> None:
+    """Put the shelf back to what the process started with, so what is recorded from it does not depend on
+    what ran before."""
+    store.reset()
 
 
 def require_token(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> None:

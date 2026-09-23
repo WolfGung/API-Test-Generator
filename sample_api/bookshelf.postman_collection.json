@@ -1,0 +1,447 @@
+{
+  "info": {
+    "name": "Bookshelf",
+    "description": "A small library API: authors, books and loans.",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "health",
+      "item": [
+        {
+          "name": "Liveness, and how many books are on the shelf",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Liveness, and how many books are on the shelf",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\"status\":\"ok\",\"books\":5}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "authors",
+      "item": [
+        {
+          "name": "All authors",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/authors",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authors"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "All authors",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[{\"id\":1,\"name\":\"Ursula K. Le Guin\",\"born\":1929},{\"id\":2,\"name\":\"Stanisław Lem\",\"born\":1921},{\"id\":3,\"name\":\"Octavia E. Butler\",\"born\":1947}]"
+            }
+          ]
+        },
+        {
+          "name": "One author",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/authors/:author_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authors",
+                ":author_id"
+              ],
+              "variable": [
+                {
+                  "key": "author_id",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "One author",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\"id\":1,\"name\":\"Ursula K. Le Guin\",\"born\":1929}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "books",
+      "item": [
+        {
+          "name": "Books, optionally those of one author",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/books?author_id=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "books"
+              ],
+              "query": [
+                {
+                  "key": "author_id",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Books, optionally those of one author",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[{\"title\":\"The Dispossessed\",\"author_id\":1,\"year\":1974,\"tags\":[\"novel\",\"utopia\"],\"id\":1},{\"title\":\"The Left Hand of Darkness\",\"author_id\":1,\"year\":1969,\"tags\":[\"novel\"],\"id\":2}]"
+            }
+          ]
+        },
+        {
+          "name": "Add a book",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"title\": \"The Dispossessed\", \"author_id\": 1, \"year\": 1974, \"tags\": [\"novel\", \"utopia\"]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/books",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "books"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Add a book",
+              "status": "Created",
+              "code": 201,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\"title\":\"The Dispossessed\",\"author_id\":1,\"year\":1974,\"tags\":[\"novel\",\"utopia\"],\"id\":6}"
+            }
+          ]
+        },
+        {
+          "name": "Books whose title contains a phrase",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/books/search?q=dispossessed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "books",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "dispossessed"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Books whose title contains a phrase",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[{\"title\":\"The Dispossessed\",\"author_id\":1,\"year\":1974,\"tags\":[\"novel\",\"utopia\"],\"id\":1},{\"title\":\"The Dispossessed\",\"author_id\":1,\"year\":1974,\"tags\":[\"novel\",\"utopia\"],\"id\":6}]"
+            }
+          ]
+        },
+        {
+          "name": "One book",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/books/:book_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "books",
+                ":book_id"
+              ],
+              "variable": [
+                {
+                  "key": "book_id",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "One book",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\"title\":\"The Dispossessed\",\"author_id\":1,\"year\":1974,\"tags\":[\"novel\",\"utopia\"],\"id\":1}"
+            }
+          ]
+        },
+        {
+          "name": "Replace a book",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"title\": \"The Dispossessed\", \"author_id\": 1, \"year\": 1974, \"tags\": [\"novel\", \"utopia\"]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/books/:book_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "books",
+                ":book_id"
+              ],
+              "variable": [
+                {
+                  "key": "book_id",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Replace a book",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\"title\":\"The Dispossessed\",\"author_id\":1,\"year\":1974,\"tags\":[\"novel\",\"utopia\"],\"id\":1}"
+            }
+          ]
+        },
+        {
+          "name": "Remove a book; removing one that is gone is still 204",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/books/:book_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "books",
+                ":book_id"
+              ],
+              "variable": [
+                {
+                  "key": "book_id",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Remove a book; removing one that is gone is still 204",
+              "status": "No Content",
+              "code": 204,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "loans",
+      "item": [
+        {
+          "name": "Lend a book to the reader in X-Reader",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-reader",
+                "value": "reader-42"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"book_id\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/loans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "loans"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Lend a book to the reader in X-Reader",
+              "status": "Created",
+              "code": 201,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\"id\":1,\"book_id\":1,\"reader\":\"reader-42\"}"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "sample-token",
+      "type": "string"
+    }
+  ]
+}

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from api_test_gen.cases import cases_for
 from api_test_gen.ir import SpecError
 from api_test_gen.postman import infer_schema, load_postman
 
@@ -170,13 +171,21 @@ def test_bodies_by_mode_and_method(small):
     assert make.body.content_type == "application/json"
     assert make.body.examples == ({"name": "new", "size": 2},)
     assert make.body.schema == {"$ref": "#/components/schemas/MakeThingRequest"}
+    # A collection says nothing about which body fields are required, so the request schema lists none.
     assert small.schemas["MakeThingRequest"] == {
         "type": "object",
         "properties": {"name": {"type": "string"}, "size": {"type": "integer"}},
-        "required": ["name", "size"],
     }
     assert small.operations[3].body.content_type == "application/x-www-form-urlencoded"
+    assert "required" not in small.operations[3].body.schema
     assert small.operations[4].body is None  # a GET carries no body, whatever the collection says
+
+
+def test_a_json_body_from_a_collection_yields_no_missing_field_case(small):
+    make_thing = small.operations[1]
+    cases = cases_for(make_thing, small)
+    assert [case.kind for case in cases] == ["positive", "no_credentials"]
+    assert cases[0].body == {"name": "new", "size": 2}
 
 
 def test_saved_responses_give_the_success_and_its_schema(small):
@@ -202,6 +211,22 @@ def test_infer_schema():
     assert infer_schema([{"x": 1}]) == {
         "type": "array",
         "items": {"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]},
+    }
+
+
+def test_infer_schema_without_required_lists_none_at_any_level():
+    assert infer_schema({"a": 1, "b": [{"c": {"d": True}}]}, required=False) == {
+        "type": "object",
+        "properties": {
+            "a": {"type": "integer"},
+            "b": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"c": {"type": "object", "properties": {"d": {"type": "boolean"}}}},
+                },
+            },
+        },
     }
 
 

@@ -192,6 +192,8 @@ def _headers(raw: Any, variables: dict[str, str]) -> Iterator[Parameter]:
 def _body(
     raw: Any, method: str, variables: dict[str, str], schemas: dict[str, dict[str, Any]], class_name: str
 ) -> Body | None:
+    """A collection shows one request that worked; it says nothing about which of its body fields are required,
+    so the schema inferred here lists none and no missing-field negative is generated from it."""
     if method not in METHODS_WITH_BODY or not isinstance(raw, dict):
         return None
     mode = str(raw.get("mode") or "")
@@ -203,7 +205,7 @@ def _body(
             value = json.loads(text)
         except json.JSONDecodeError:
             return Body(content_type="text/plain", schema={"type": "string"}, required=True, examples=(text,))
-        schema = infer_schema(value)
+        schema = infer_schema(value, required=False)
         if isinstance(value, dict | list):
             schema = register_schema(schemas, f"{class_name}Request", schema)
         return Body(content_type="application/json", schema=schema, required=True, examples=(value,))
@@ -215,7 +217,8 @@ def _body(
         }
         if not fields:
             return None
-        return Body(content_type=FORM_TYPES[mode], schema=infer_schema(fields), required=True, examples=(fields,))
+        schema = infer_schema(fields, required=False)
+        return Body(content_type=FORM_TYPES[mode], schema=schema, required=True, examples=(fields,))
     if mode == "file":
         return Body(
             content_type="application/octet-stream", schema={"type": "string", "format": "binary"}, required=True
@@ -257,8 +260,10 @@ def _responses(saved: list[Any], schemas: dict[str, dict[str, Any]], class_name:
     return (Response(status="2XX", schema=None),)
 
 
-def infer_schema(value: Any) -> dict[str, Any]:
-    """A JSON schema that describes one value: types only, every key of an object required."""
+def infer_schema(value: Any, *, required: bool = True) -> dict[str, Any]:
+    """A JSON schema that describes one value: types only. With `required`, every key of an object is required
+    (a saved response shows what a success carries); without it no object at any level lists any (a request
+    body shows one set of fields that worked, not which of them had to be there)."""
     if isinstance(value, bool):
         return {"type": "boolean"}
     if isinstance(value, int):
@@ -268,13 +273,15 @@ def infer_schema(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         return {"type": "string"}
     if isinstance(value, list):
-        return {"type": "array", "items": infer_schema(value[0])} if value else {"type": "array"}
+        if not value:
+            return {"type": "array"}
+        return {"type": "array", "items": infer_schema(value[0], required=required)}
     if isinstance(value, dict):
         if not value:
             return {"type": "object"}
-        return {
-            "type": "object",
-            "properties": {str(k): infer_schema(v) for k, v in value.items()},
-            "required": [str(k) for k in value],
-        }
+        properties = {str(k): infer_schema(v, required=required) for k, v in value.items()}
+        schema: dict[str, Any] = {"type": "object", "properties": properties}
+        if required:
+            schema["required"] = [str(k) for k in value]
+        return schema
     return {}
