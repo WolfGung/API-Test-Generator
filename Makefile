@@ -11,7 +11,7 @@ test:
 lint:
 	ruff check src tests tools sample_api examples
 
-# Regenerate the three committed example suites; the tests refuse examples
+# Regenerate the four committed example suites; the tests refuse examples
 # that differ from what the generator writes.
 examples:
 	python3 -m tools.examples

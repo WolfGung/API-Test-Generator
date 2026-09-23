@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests tools sample_api examples
+
+  test:
+    # The generator's tests, the committed examples against fresh generation,
+    # and the generated sample-API suites against the sample API started in-process.
+    # Nothing here reaches the network after pip.
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  petstore-live:
+    # The Petstore suite against the public server: somebody else's data, so a red
+    # here is information, not a verdict on the generator. Nightly and on request.
+    name: Petstore suite against petstore3.swagger.io (allowed to fail)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -e ".[dev]"
+      - run: api-test-gen --spec fixtures/petstore-openapi3.json --out build/petstore --overwrite --base-url https://petstore3.swagger.io/api/v3
+      - run: pytest build/petstore -q -p no:cacheprovider --junitxml=build/petstore-junit.xml
+        env:
+          # The key the public Petstore documents for its own demo; not a secret.
+          API_KEY: special-key
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: petstore-live
+          path: build/petstore-junit.xml

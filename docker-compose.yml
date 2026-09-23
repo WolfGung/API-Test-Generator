@@ -1,0 +1,25 @@
+# `docker compose run --rm gen` starts the sample API, generates its suite from
+# sample_api/openapi.json and runs the suite against it — the whole proof in
+# two containers. `docker compose run --rm gen api-test-gen --spec ... --out ...`
+# runs the generator on anything else you mount.
+services:
+  api:
+    build: .
+    command: python -m uvicorn sample_api.app:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  gen:
+    build: .
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: http://api:8000
+      API_TOKEN: sample-token
+    command: >
+      sh -c "api-test-gen --spec sample_api/openapi.json --out /tmp/generated --overwrite
+      && pytest /tmp/generated -q -p no:cacheprovider"

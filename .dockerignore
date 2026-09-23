@@ -1,0 +1,10 @@
+# Only what the Dockerfile copies enters the build context: the package, the
+# sample API, the two public documents and the two files the install reads.
+*
+!pyproject.toml
+!README.md
+!src
+!sample_api
+!fixtures
+**/__pycache__
+**/*.egg-info
