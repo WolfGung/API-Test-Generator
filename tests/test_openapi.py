@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from api_test_gen.ir import SpecError
-from api_test_gen.openapi import load_openapi
+from api_test_gen.openapi import load_document, load_openapi
 from tests.documents import PARAMETERS
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -192,3 +192,23 @@ def test_a_file_that_is_not_utf8_is_refused(tmp_path):
     path.write_bytes("openapi: 3.0.3\ninfo: {title: Café, version: '1'}\npaths: {}\n".encode("latin-1"))
     with pytest.raises(SpecError, match="not UTF-8 text"):
         load_openapi(path)
+
+
+def test_yaml_scalars_are_read_as_the_document_wrote_them(tmp_path):
+    """PyYAML's implicit typing would send an unquoted timestamp example as `2024-01-31 12:00:00+00:00`, put a
+    `datetime.date` into a Literal and turn `on`/`off`/`yes`/`no` into booleans. Those scalars stay strings,
+    as in YAML 1.2; `true`/`false` (in any case), integers, floats and null keep their types."""
+    path = tmp_path / "scalars.yaml"
+    path.write_text(
+        "stamp: 2024-01-31T12:00:00Z\nday: 2024-01-31\nswitch: [on, off, yes, no, true, false, True, FALSE]\n"
+        "count: 3\nratio: 1.5\nnothing: null\nempty:\n"
+    )
+    assert load_document(path) == {
+        "stamp": "2024-01-31T12:00:00Z",
+        "day": "2024-01-31",
+        "switch": ["on", "off", "yes", "no", True, False, True, False],
+        "count": 3,
+        "ratio": 1.5,
+        "nothing": None,
+        "empty": None,
+    }

@@ -109,3 +109,32 @@ paths:
       responses:
         "200": {description: ok}
 """
+
+
+# Scalars YAML would type on its own: an unquoted timestamp example, a date enum, an on/off enum.
+YAML_SCALARS = """
+openapi: 3.0.3
+info: {title: Scalars, version: "1"}
+components:
+  schemas:
+    Day: {type: string, enum: [2024-01-31, 2024-02-29]}
+    Switch: {type: string, enum: [on, off]}
+    Report:
+      type: object
+      required: [day, switch]
+      properties:
+        day: {$ref: "#/components/schemas/Day"}
+        switch: {$ref: "#/components/schemas/Switch"}
+paths:
+  /reports:
+    get:
+      operationId: listReports
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema: {type: string, format: date-time}
+          example: 2024-01-31T12:00:00Z
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: "#/components/schemas/Report"}}}}
+"""

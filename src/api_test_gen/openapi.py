@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,23 @@ METHODS = ("get", "put", "post", "delete", "patch", "head", "options")
 COMPONENTS = "#/components/"
 
 
+class _Loader(yaml.SafeLoader):
+    """SafeLoader with YAML 1.2 scalars, which is the YAML an OpenAPI document is written in: no implicit
+    timestamps, and only `true`/`false` are booleans. An unquoted `2024-01-31T12:00:00Z`, `on` or `yes` stays
+    the string the document shows, so an example is sent as written and an enum of dates becomes a Literal of
+    strings that imports; `required: true`, integers, floats and null keep their types."""
+
+
+_UNTYPED = {"tag:yaml.org,2002:timestamp", "tag:yaml.org,2002:bool"}
+_Loader.yaml_implicit_resolvers = {
+    first: [(tag, regexp) for tag, regexp in resolvers if tag not in _UNTYPED]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_Loader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF")
+)
+
+
 def load_document(path: Path) -> dict[str, Any]:
     """JSON by extension, YAML otherwise; a mapping at the top or a SpecError. The message names the cause; the
     command line puts the file in front of it."""
@@ -23,7 +41,7 @@ def load_document(path: Path) -> dict[str, Any]:
     except UnicodeDecodeError as exc:
         raise SpecError("not UTF-8 text") from exc
     try:
-        data = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
+        data = json.loads(text) if path.suffix.lower() == ".json" else yaml.load(text, Loader=_Loader)
     except (json.JSONDecodeError, yaml.YAMLError) as exc:
         raise SpecError(f"cannot parse: {exc}") from exc
     if not isinstance(data, dict):

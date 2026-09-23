@@ -5,8 +5,8 @@ import pytest
 from api_test_gen.generator import OutputExists, UnknownTag, generate
 from api_test_gen.openapi import load_openapi
 from api_test_gen.postman import load_postman
-from tests.documents import BOOKISH, NO_SCHEMAS
-from tests.helpers import collected, ruff_check
+from tests.documents import BOOKISH, NO_SCHEMAS, YAML_SCALARS
+from tests.helpers import collected, load_module, ruff_check
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -134,3 +134,19 @@ def test_the_public_documents_generate_lint_clean_collectable_suites(loader, nam
     assert summary.operations == operations
     assert collected(out) == summary.tests
     assert ruff_check(out) == ""
+
+
+def test_yaml_dates_and_switches_reach_the_suite_as_the_strings_the_document_wrote(tmp_path):
+    """An unquoted timestamp example is sent as written, and a date or on/off enum becomes a Literal of strings
+    that imports - not `Literal[datetime.date(2024, 1, 31)]` (a NameError) or `Literal[True, False]`."""
+    path = tmp_path / "scalars.yaml"
+    path.write_text(YAML_SCALARS)
+    out = tmp_path / "out"
+    generate(load_openapi(path), out, source_name="scalars.yaml")
+    assert ruff_check(out) == ""
+    assert '        params={"since": "2024-01-31T12:00:00Z"},\n' in (out / "test_default.py").read_text()
+    models = (out / "models.py").read_text()
+    assert 'Day = Literal["2024-01-31", "2024-02-29"]' in models
+    assert 'Switch = Literal["on", "off"]' in models
+    module = load_module(out / "models.py")
+    assert module.Report.model_validate({"day": "2024-01-31", "switch": "off"}).switch == "off"

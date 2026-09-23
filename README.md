@@ -81,6 +81,8 @@ The generator reads OpenAPI 3.0 and 3.1 documents (YAML or JSON, `$ref` within t
 - **One negative case per required query or header parameter and per required top-level body field:** the same request with that one thing left out, expected to answer 4xx.
 - **A case without credentials** where the operation is secured, expected to answer 401 or 403.
 
+YAML scalars are read as the document wrote them: an unquoted `2024-01-31T12:00:00Z`, `on` or `yes` stays that string, not a date or a boolean, so an example is sent as the document shows it and an enum of dates stays an enum of strings. `true` and `false`, numbers and `null` keep their types.
+
 An operation with a form, multipart or binary body gets a test marked `skip`, with the reason in it. The four suites are committed under [`examples/`](examples/) exactly as the generator writes them. `tests/test_examples.py` regenerates each and refuses a difference; `tests/test_readme_pins.py` refuses this page when a number moves.
 
 `conftest.py` holds the HTTP client and the credentials fixture: `API_BASE_URL` points the suite at a server, and `API_TOKEN`, `API_KEY` or `API_USERNAME`/`API_PASSWORD` carry the credentials, without which the secured operations are skipped rather than failed. `models.py` holds one Pydantic model per named schema, with `extra="forbid"` where the document closes the schema and an alias wherever a property name cannot be a Python field name. A Postman collection has no schemas, so the model of a response is inferred from the saved example response, types only; and since a collection says nothing about which fields are required, no missing-field negative comes from one, and the suite's own README says so.

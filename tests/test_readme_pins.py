@@ -311,3 +311,17 @@ def test_the_related_work_links_are_the_other_repositories_of_the_portfolio():
         assert f"https://github.com/WolfGung/{name})" in README, name
     related = counted(r"^(\w+) more repositories from the same portfolio", "how many related repositories")
     assert related == len(names), f"the page links {len(names)} repositories"
+
+
+def test_the_yaml_scalars_the_page_names_are_read_as_strings(tmp_path):
+    line = pinned(
+        r"YAML scalars are read as the document wrote them: "
+        r"an unquoted `([^`]+)`, `([^`]+)` or `([^`]+)` stays that string",
+        "how YAML scalars are read",
+    )
+    path = tmp_path / "scalars.yaml"
+    path.write_text("".join(f"key{index}: {scalar}\n" for index, scalar in enumerate(line.groups())))
+    assert list(load_document(path).values()) == list(line.groups()), "the loader types a scalar the page says it keeps"
+    pinned(r"`true` and `false`, numbers and `null` keep their types\.", "what the YAML loader still types")
+    path.write_text("yes: true\nno: false\ncount: 3\nratio: 1.5\nnothing: null\n")
+    assert load_document(path) == {"yes": True, "no": False, "count": 3, "ratio": 1.5, "nothing": None}
