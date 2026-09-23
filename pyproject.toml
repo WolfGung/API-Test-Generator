@@ -37,10 +37,6 @@ addopts = "-ra --strict-markers --strict-config"
 markers = [
     "live: starts the sample API and runs a generated suite against it",
 ]
-filterwarnings = [
-    # starlette 1.7 asks for the httpx2 package in its test client and warns once at import when it finds httpx.
-    "ignore:Using `httpx` with `starlette.testclient` is deprecated:UserWarning",
-]
 
 [tool.ruff]
 line-length = 120
