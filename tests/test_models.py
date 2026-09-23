@@ -343,3 +343,51 @@ def test_allof_of_refs_to_allof_composed_classes_keeps_every_fields_own_type(tmp
         models.TaggedPet.model_validate({"name": "n", "tag": 5, "color": ["x"]})
     with pytest.raises(ValidationError):
         models.StrictPet.model_validate({"name": "n"})  # StrictPet's own `required: [owner]` must still apply
+
+
+def test_flatten_does_not_recurse_forever_on_a_cyclic_allof(tmp_path):
+    """Fix round 3 regression: round 2 made `is_class` recognize a cyclic allOf schema as a class more often
+    (by resolving through nested allOf), which routes it into `_flatten` to build its field list - and
+    `_flatten` had no cycle guard at all, so A <-> B (each reaching the other through allOf, with a real object
+    C reachable only through a third schema D) recursed forever. A part whose $ref names a schema already on
+    the current path must contribute nothing instead, so both A and B still come out as classes carrying the
+    field the cycle would otherwise have hidden."""
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={
+            "C": {"type": "object", "required": ["x"], "properties": {"x": {"type": "string"}}},
+            "D": {"allOf": [{"$ref": "#/components/schemas/C"}]},
+            "A": {"allOf": [{"$ref": "#/components/schemas/B"}]},
+            "B": {"allOf": [{"$ref": "#/components/schemas/A"}, {"$ref": "#/components/schemas/D"}]},
+        },
+    )
+    source = generate_models(api, "cycle.yaml")
+    path = tmp_path / "models.py"
+    path.write_text(source)
+    assert ruff_check(path) == ""
+    assert "class A" in source
+    assert "class B" in source
+    models = load_module(path)
+    assert models.A.model_validate({"x": "v"}).x == "v"
+    assert models.B.model_validate({"x": "v"}).x == "v"
+    with pytest.raises(ValidationError):
+        models.B.model_validate({})  # x is required, reached only through D -> C
+
+
+def test_flatten_handles_a_shallower_cyclic_allof_too(tmp_path):
+    """The one-hop-shallower shape the re-review also named: A -> B, B -> (A, C) directly (no pass-through D)."""
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={
+            "C": {"type": "object", "required": ["x"], "properties": {"x": {"type": "string"}}},
+            "A": {"allOf": [{"$ref": "#/components/schemas/B"}]},
+            "B": {"allOf": [{"$ref": "#/components/schemas/A"}, {"$ref": "#/components/schemas/C"}]},
+        },
+    )
+    source = generate_models(api, "shallow.yaml")
+    path = tmp_path / "models.py"
+    path.write_text(source)
+    assert ruff_check(path) == ""
+    models = load_module(path)
+    assert models.A.model_validate({"x": "v"}).x == "v"
+    assert models.B.model_validate({"x": "v"}).x == "v"

@@ -240,12 +240,21 @@ class _Writer:
                 expr = self.any()
         return f"{expr} | None" if nullable and not expr.endswith("| None") else expr
 
-    def _flatten(self, schema: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-        """Properties and required names, with `allOf` parts merged in (references resolved)."""
+    def _flatten(
+        self, schema: dict[str, Any], visited: frozenset[str] = frozenset()
+    ) -> tuple[dict[str, Any], list[str]]:
+        """Properties and required names, with `allOf` parts merged in (references resolved). `visited` holds
+        the schema names already on this path - the class this started from, plus every `$ref` followed to get
+        here - so a part whose `$ref` names one of them contributes nothing, ending a cycle instead of
+        recursing forever."""
         properties: dict[str, Any] = {}
         required: list[str] = []
         for part in schema.get("allOf") or []:
-            part_properties, part_required = self._flatten(self.resolve(part))
+            target = ref_name(part["$ref"]) if isinstance(part, dict) and "$ref" in part else None
+            if target is not None and target in visited:
+                continue
+            part_visited = visited | {target} if target is not None else visited
+            part_properties, part_required = self._flatten(self.resolve(part), part_visited)
             properties.update(part_properties)
             required += [name for name in part_required if name not in required]
         properties.update(schema.get("properties") or {})
@@ -254,7 +263,7 @@ class _Writer:
 
     def class_block(self, name: str) -> list[str]:
         schema = self.schemas[name]
-        properties, required = self._flatten(schema)
+        properties, required = self._flatten(schema, frozenset({name}))
         self.pydantic_used.add("BaseModel")
         lines = [f"class {self.names[name]}(BaseModel):", f'    """{_docline(schema, self.names[name])}"""']
         config: list[str] = []
