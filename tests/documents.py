@@ -86,3 +86,26 @@ paths:
       responses:
         "204": {description: fine}
 """
+
+
+# Optional parameters whose values live in the schema, the way FastAPI and any OpenAPI 3.1 document carry them.
+PARAMETERS = """
+openapi: 3.1.0
+info: {title: Parameters, version: "1"}
+components:
+  schemas:
+    Limit: {type: integer, examples: [10], default: 20}
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - {name: author, in: query, schema: {type: integer, examples: [1]}}
+        - {name: limit, in: query, schema: {$ref: "#/components/schemas/Limit"}}
+        - {name: page, in: query, schema: {type: integer, default: 3}}
+        - {name: sort, in: query, schema: {type: string}}
+        - {name: q, in: query, example: given, schema: {type: string, examples: [from the schema]}}
+        - {name: X-Mode, in: header, schema: {type: string, const: fast}}
+      responses:
+        "200": {description: ok}
+"""

@@ -12,6 +12,7 @@ def test_list_books(client):
     response = client.request(
         "GET",
         "/books",
+        params={"author_id": 1, "limit": 10},
     )
     assert response.status_code == 200, response.text[:300]
     TypeAdapter(ListBooksResponse).validate_python(response.json())

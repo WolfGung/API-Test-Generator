@@ -8,7 +8,7 @@ from typing import Any
 
 from .ir import ApiModel, Operation, Parameter, ref_name
 from .naming import to_identifier, unique
-from .samples import required_fields, sample_for
+from .samples import has_example, required_fields, sample_for
 
 SUPPORTED_AUTH = ("bearer", "basic", "apiKey")
 PLACEHOLDER = re.compile(r"\{([^{}/]+)\}")
@@ -67,6 +67,12 @@ def _value(parameter: Parameter, api: ApiModel) -> Any:
     return parameter.examples[0] if parameter.examples else sample_for(parameter.schema, api)
 
 
+def _given(parameter: Parameter, api: ApiModel) -> bool:
+    """Whether the positive request carries the parameter: a required one always, an optional one when the
+    document gives it a value (an example on the parameter or its schema, a default, a const), as body fields."""
+    return parameter.required or bool(parameter.examples) or has_example(api.resolve(parameter.schema))
+
+
 def _doc(operation: Operation, tail: str) -> str:
     """One line for the test's docstring; quotes and backslashes are replaced so the docstring cannot break."""
     text = f"{operation.method} {operation.path}: {tail}" if tail else f"{operation.method} {operation.path}"
@@ -78,8 +84,8 @@ def _positive(operation: Operation, api: ApiModel, taken: set[str]) -> Case:
     path_params = {p.name: _value(p, api) for p in operation.parameters_in("path")}
     for name in PLACEHOLDER.findall(operation.path):  # a placeholder the document never declared
         path_params.setdefault(name, "string")
-    query = {p.name: _value(p, api) for p in operation.parameters_in("query") if p.required or p.examples}
-    headers = {p.name: str(_value(p, api)) for p in operation.parameters_in("header") if p.required or p.examples}
+    query = {p.name: _value(p, api) for p in operation.parameters_in("query") if _given(p, api)}
+    headers = {p.name: str(_value(p, api)) for p in operation.parameters_in("header") if _given(p, api)}
     body: Any = None
     body_kind: str | None = None
     skip_reason: str | None = None

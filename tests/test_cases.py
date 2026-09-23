@@ -3,6 +3,7 @@ from pathlib import Path
 from api_test_gen.cases import cases_for
 from api_test_gen.ir import ApiModel, Body, Operation, Parameter, Response, Security
 from api_test_gen.openapi import load_openapi
+from tests.documents import PARAMETERS
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -175,3 +176,14 @@ def test_petstore_cases():
     assert len(upload) == 1 and upload[0].skip_reason.startswith("request body is application/octet-stream")
     total = sum(len(cases_for(op, api)) for op in api.operations)
     assert total == 33
+
+
+def test_an_optional_parameter_is_sent_when_the_document_gives_it_a_value(tmp_path):
+    """An example inside the schema (where OpenAPI 3.1 documents keep it), a default or a const is a value the
+    document gives; a parameter-level example outranks the schema's; a parameter with none of them is left out."""
+    path = tmp_path / "parameters.yaml"
+    path.write_text(PARAMETERS)
+    api = load_openapi(path)
+    [positive] = cases_for(api.operations[0], api)  # every parameter is optional, so there are no negatives
+    assert positive.query == {"author": 1, "limit": 10, "page": 3, "q": "given"}
+    assert positive.headers == {"X-Mode": "fast"}

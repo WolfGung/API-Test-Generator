@@ -5,6 +5,7 @@ import yaml
 
 from api_test_gen.ir import SpecError
 from api_test_gen.openapi import load_openapi
+from tests.documents import PARAMETERS
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -172,3 +173,15 @@ def test_petstore_facts():
     assert api.schemas["FindPetsByStatusResponse"]["items"] == {"$ref": "#/components/schemas/Pet"}
     assert by_id["place_order"].secured is False
     assert yaml.safe_load(SMALL)["openapi"] == "3.0.3"  # the inline document above is what the other tests parse
+
+
+def test_parameter_examples_fall_back_to_the_schema_with_a_reference_followed(tmp_path):
+    path = tmp_path / "parameters.yaml"
+    path.write_text(PARAMETERS)
+    by_name = {p.name: p for p in load_openapi(path).operations[0].parameters}
+    assert by_name["author"].examples == (1,)  # the schema's, where OpenAPI 3.1 documents carry them
+    assert by_name["limit"].examples == (10,)  # found through the reference
+    assert by_name["limit"].schema == {"$ref": "#/components/schemas/Limit"}  # which the schema itself keeps
+    assert by_name["page"].examples == ()  # a default is not an example; the case builder still sends it
+    assert by_name["q"].examples == ("given",)  # the parameter's own, when it has one
+    assert by_name["sort"].examples == ()

@@ -141,13 +141,15 @@ def _number(schema: dict[str, Any]) -> float:
     return value
 
 
-def _has_example(schema: dict[str, Any]) -> bool:
+def has_example(schema: dict[str, Any]) -> bool:
+    """Whether the (resolved) schema gives a value of its own: an example, a default or a const. An optional body
+    field or parameter is sent only then."""
     return any(key in schema for key in ("example", "examples", "default", "const"))
 
 
 def _object(schema: dict[str, Any], api: ApiModel, depth: int, expanding: frozenset[str]) -> dict[str, Any]:
     properties = schema.get("properties") or {}
     required = [name for name in schema.get("required") or [] if name in properties]
-    optional = [name for name in properties if name not in required and _has_example(api.resolve(properties[name]))]
+    optional = [name for name in properties if name not in required and has_example(api.resolve(properties[name]))]
     wanted = required + optional
     return {name: sample_for(properties[name], api, depth + 1, expanding) for name in wanted}

@@ -114,6 +114,17 @@ def _examples(holder: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(found)
 
 
+def _resolved(schema: dict[str, Any], components: dict[str, Any]) -> dict[str, Any]:
+    """The schema behind a `$ref` into #/components/schemas, any depth; an inline schema as it is."""
+    hops = 0
+    while "$ref" in schema:
+        schema = _component(schema, components)
+        hops += 1
+        if hops > 50:
+            raise SpecError(f"reference loop at {schema.get('$ref')!r}")
+    return schema
+
+
 def _parameter(raw: dict[str, Any], components: dict[str, Any]) -> Parameter | None:
     raw = _component(raw, components)
     location = raw.get("in")
@@ -128,7 +139,9 @@ def _parameter(raw: dict[str, Any], components: dict[str, Any]) -> Parameter | N
         location=location,
         required=bool(raw.get("required")) or location == "path",
         schema=dict(schema),
-        examples=_examples(raw),
+        # The parameter's own example first; else the schema's, where OpenAPI 3.1 documents (FastAPI's among
+        # them) keep a parameter's examples.
+        examples=_examples(raw) or _examples(_resolved(schema, components)),
     )
 
 
