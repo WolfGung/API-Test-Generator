@@ -287,3 +287,35 @@ def test_a_declared_but_unused_unsupported_scheme_leaves_no_note(tmp_path):
     assert used.notes == ("main (oauth2) security is not supported; the suite sends no credentials",)
     opted_out = oauth.replace("      operationId: listThings\n", "      operationId: listThings\n      security: []\n")
     assert load_text(tmp_path, "opted_out.yaml", opted_out).notes == ()
+
+
+def test_numbers_are_read_by_the_yaml_1_2_core_schema(tmp_path):
+    """PyYAML's YAML 1.1 resolvers read `12:30:00` (a `format: time` example) as the sexagesimal integer 45000 and
+    `1_000` as 1000. YAML 1.2, the YAML an OpenAPI document is written in, has neither: an integer is decimal,
+    `0x` or `0o`; a float is plain or with an exponent, `.inf` or `.nan`. `1.10` is a float in YAML 1.2 (a client
+    quotes it); `010` is ten, not eight; `0b1` is a string."""
+    path = tmp_path / "numbers.yaml"
+    path.write_text(
+        "time: 12:30:00\nthousand: 1_000\nbinary: 0b1\ncount: 42\nminus: -1\nplus: +3\nhex: 0x1f\noctal: 0o17\n"
+        "ten: 010\nratio: 1.5\nexponent: 1e3\nversion: 1.10\ntrailing: 1.\nleading: .5\ninfinite: -.inf\n"
+    )
+    assert load_document(path) == {
+        "time": "12:30:00",
+        "thousand": "1_000",
+        "binary": "0b1",
+        "count": 42,
+        "minus": -1,
+        "plus": 3,
+        "hex": 31,
+        "octal": 15,
+        "ten": 10,
+        "ratio": 1.5,
+        "exponent": 1000.0,
+        "version": 1.1,
+        "trailing": 1.0,
+        "leading": 0.5,
+        "infinite": float("-inf"),
+    }
+    path.write_text("nan: .nan\n")
+    nan = load_document(path)["nan"]
+    assert isinstance(nan, float) and nan != nan

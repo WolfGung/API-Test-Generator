@@ -29,20 +29,45 @@ COMPONENTS = "#/components/"
 
 
 class _Loader(yaml.SafeLoader):
-    """SafeLoader with YAML 1.2 scalars, which is the YAML an OpenAPI document is written in: no implicit
-    timestamps, and only `true`/`false` are booleans. An unquoted `2024-01-31T12:00:00Z`, `on` or `yes` stays
-    the string the document shows, so an example is sent as written and an enum of dates becomes a Literal of
-    strings that imports; `required: true`, integers, floats and null keep their types."""
+    """SafeLoader with the scalars of the YAML 1.2 core schema, which is the YAML an OpenAPI document is written
+    in: no implicit timestamps; only `true`/`false` are booleans; an integer is decimal, `0x` or `0o`; a float
+    is plain or with an exponent, `.inf` or `.nan`. An unquoted `2024-01-31T12:00:00Z`, `on`, `yes`, `12:30:00`
+    or `1_000` stays the string the document shows (PyYAML's YAML 1.1 resolvers would make the last two the
+    integers 45000 and 1000), so an example is sent as written and an enum of dates becomes a Literal of strings
+    that imports; `required: true`, `42`, `1.5`, `1e3` and null keep their types."""
 
 
-_UNTYPED = {"tag:yaml.org,2002:timestamp", "tag:yaml.org,2002:bool"}
+_RETYPED = {"tag:yaml.org,2002:timestamp", "tag:yaml.org,2002:bool", "tag:yaml.org,2002:int", "tag:yaml.org,2002:float"}
 _Loader.yaml_implicit_resolvers = {
-    first: [(tag, regexp) for tag, regexp in resolvers if tag not in _UNTYPED]
+    first: [(tag, regexp) for tag, regexp in resolvers if tag not in _RETYPED]
     for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
 _Loader.add_implicit_resolver(
     "tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF")
 )
+_Loader.add_implicit_resolver(
+    "tag:yaml.org,2002:int", re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$"), list("-+0123456789")
+)
+_Loader.add_implicit_resolver(
+    "tag:yaml.org,2002:float",
+    re.compile(
+        r"^(?:[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*)(?:[eE][-+]?[0-9]+)?"  # a decimal point, with or without an exponent
+        r"|[-+]?[0-9]+[eE][-+]?[0-9]+"  # an exponent alone: 1e3
+        r"|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$"
+    ),
+    list("-+0123456789."),
+)
+
+
+def _construct_int(loader: yaml.SafeLoader, node: yaml.Node) -> int:
+    """The integer of a YAML 1.2 core-schema scalar. PyYAML's own constructor reads a leading zero as octal
+    (`010` is eight, `09` an error) and knows `_` and sexagesimal `:`, none of which the resolver above lets
+    through; here `010` is ten, and `0x1f` and `0o17` carry their base in the prefix."""
+    value = loader.construct_scalar(node)
+    return int(value, 0) if value.startswith(("0x", "0o")) else int(value)
+
+
+_Loader.add_constructor("tag:yaml.org,2002:int", _construct_int)
 
 
 def load_document(path: Path) -> dict[str, Any]:
