@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,10 +22,11 @@ def ruff_check(*paths: Path, ignore: tuple[str, ...] = ()) -> str:
 
 
 def collected(directory: Path) -> int:
-    """How many tests pytest collects from a generated suite, run as a separate process."""
+    """How many tests pytest collects from a generated suite, run as a separate process that writes no bytecode
+    cache next to the suite: a committed example must stay exactly the generator's files."""
     result = subprocess.run(
         [sys.executable, "-m", "pytest", str(directory), "--collect-only", "-q", "-p", "no:cacheprovider"],
-        cwd=REPO, capture_output=True, text=True, check=False,
+        cwd=REPO, capture_output=True, text=True, check=False, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return int(result.stdout.strip().splitlines()[-1].split()[0])
