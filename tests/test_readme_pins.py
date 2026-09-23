@@ -306,6 +306,7 @@ def test_the_related_work_links_are_the_other_repositories_of_the_portfolio():
         "Marketplace-Test-Automation-Framework",
         "Web-Scraping-Automation-Framework",
         "Test-Suite-Rescue",
+        "Accessibility-Test-Automation-Framework",
     )
     for name in names:
         assert f"https://github.com/WolfGung/{name})" in README, name
