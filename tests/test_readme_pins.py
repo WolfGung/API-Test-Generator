@@ -18,7 +18,7 @@ from typer.testing import CliRunner
 
 from api_test_gen.cli import app
 from api_test_gen.generator import Summary
-from api_test_gen.openapi import load_document
+from api_test_gen.openapi import load_document, load_openapi
 from api_test_gen.postman import SUPPORTED_SCHEMAS
 from sample_api.app import TOKEN
 from tests import test_live
@@ -325,3 +325,25 @@ def test_the_yaml_scalars_the_page_names_are_read_as_strings(tmp_path):
     pinned(r"`true` and `false`, numbers and `null` keep their types\.", "what the YAML loader still types")
     path.write_text("yes: true\nno: false\ncount: 3\nratio: 1.5\nnothing: null\n")
     assert load_document(path) == {"yes": True, "no": False, "count": 3, "ratio": 1.5, "nothing": None}
+
+
+def test_what_the_page_says_is_not_generated_is_dropped_with_a_note(tmp_path):
+    pinned(r"^- \*\*Cookie parameters\.\*\* A parameter with `in: cookie` is not sent; the generator prints a `note:`",
+           "the cookie parameters bullet")
+    loading = (SOURCE / "openapi.py").read_text(encoding="utf-8")
+    assert 'in ("path", "query", "header")' in loading, "openapi.py accepts exactly path, query and header parameters"
+    pinned(
+        r"keys in a query string or a cookie leave the operation unsecured .*: "
+        r"the generator prints a `note:` saying so",
+        "the unsupported-authentication bullet",
+    )
+    path = tmp_path / "unsupported.yaml"
+    path.write_text(
+        "openapi: 3.0.3\ninfo: {title: U, version: '1'}\nsecurity: [{k: []}]\n"
+        "components: {securitySchemes: {k: {type: apiKey, in: cookie, name: k}}}\n"
+        "paths: {/t: {get: {parameters: [{name: c, in: cookie, schema: {}}], responses: {'200': {description: ok}}}}}\n"
+    )
+    api = load_openapi(path)
+    assert api.security.kind == "none", "a key in a cookie leaves the suite without credentials"
+    assert any("security is not supported" in note for note in api.notes), "the loader notes the scheme"
+    assert any("cookie parameter" in note for note in api.notes), "the loader notes the cookie parameter"

@@ -324,3 +324,68 @@ def test_an_unresolved_variable_leading_the_host_takes_the_whole_label_with_it(t
     assert api.base_url == ""
     assert api.operations[0].path == path
     assert query_of(api) == query
+
+
+def _load_items(tmp_path, items, auth=None, name="notes"):
+    path = tmp_path / f"{name}.postman_collection.json"
+    document = {
+        "info": {"name": "Notes", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+        "variable": [{"key": "known", "value": "resolved"}],
+        "item": items,
+    }
+    if auth is not None:
+        document["auth"] = auth
+    path.write_text(json.dumps(document))
+    return load_postman(path)
+
+
+def test_a_header_whose_value_holds_an_unresolved_variable_is_dropped_with_a_note(tmp_path):
+    api = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {
+            "method": "GET", "url": "https://api.example.com/things",
+            "header": [
+                {"key": "X-Trace", "value": "{{trace}}"},
+                {"key": "X-Mixed", "value": "id-{{trace}}-{{other}}"},
+                {"key": "X-Known", "value": "{{known}}"},
+                {"key": "X-Plain", "value": "abc"},
+            ],
+        },
+    }])
+    headers = [(p.name, p.examples[0]) for p in api.operations[0].parameters_in("header")]
+    assert headers == [("X-Known", "resolved"), ("X-Plain", "abc")]
+    assert api.notes == (
+        "get_thing: header 'X-Trace' is not sent; {{trace}} is not a collection variable",
+        "get_thing: header 'X-Mixed' is not sent; {{trace}} is not a collection variable",
+    )
+
+
+def test_an_unsupported_auth_with_no_supported_one_leaves_a_note(tmp_path):
+    ping = {"name": "Ping", "request": {"method": "GET", "url": "https://api.example.com/ping"}}
+    digest = _load_items(tmp_path, [ping], auth={"type": "digest", "digest": []}, name="digest")
+    assert digest.security.kind == "none" and digest.operations[0].secured is False
+    assert digest.notes == ("digest auth is not supported; the suite sends no credentials",)
+    fields = [{"key": "key", "value": "api_key"}, {"key": "in", "value": "query"}]
+    keyed = _load_items(tmp_path, [ping], auth={"type": "apikey", "apikey": fields}, name="keyed")
+    assert keyed.notes == ("apikey in query auth is not supported; the suite sends no credentials",)
+    mixed = _load_items(
+        tmp_path,
+        [ping, {**ping, "name": "Pong", "request": {**ping["request"], "auth": {"type": "bearer", "bearer": []}}}],
+        auth={"type": "oauth2", "oauth2": []}, name="mixed",
+    )
+    assert mixed.security.kind == "bearer" and mixed.notes == ()
+
+
+def test_a_body_mode_the_loader_does_not_know_is_written_skipped(tmp_path):
+    api = _load_items(tmp_path, [{
+        "name": "Query",
+        "request": {
+            "method": "POST", "url": "https://api.example.com/graphql",
+            "body": {"mode": "graphql", "graphql": {"query": "{ things { id } }", "variables": ""}},
+        },
+    }])
+    body = api.operations[0].body
+    assert body.content_type == "graphql (a Postman body mode)" and body.is_json is False
+    [only] = cases_for(api.operations[0], api)
+    assert only.skip_reason == "request body is graphql (a Postman body mode), which the generator does not produce"
+    assert only.body is None

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
-from .ir import NO_SECURITY, ApiModel, Body, Operation, Parameter, Response, Security, SpecError
+from .ir import NO_SECURITY, UNSUPPORTED_SECURITY, ApiModel, Body, Operation, Parameter, Response, Security, SpecError
 from .naming import to_class_name, to_identifier, unique
 from .openapi import load_document, register_schema
 
@@ -21,7 +21,7 @@ _VARIABLE = re.compile(r"\{\{([^{}]+)\}\}")
 _COLON_SEGMENT = re.compile(r"(?<=/):([A-Za-z_][A-Za-z0-9_]*)")
 _PATH_PARAM = re.compile(r"\{([^{}/]+)\}")
 _PATH_START = re.compile(r"[/?]")  # where the path (or a bare query) begins after a host label
-UNSUPPORTED = Security(kind="unsupported")
+SUPPORTED_AUTH = ("bearer", "basic", "apiKey")
 
 
 def load_postman(path: Path) -> ApiModel:
@@ -36,8 +36,11 @@ def load_postman(path: Path) -> ApiModel:
     taken: set[str] = set()
     base_url = ""
     security = NO_SECURITY
+    notes: list[str] = []
+    unsupported: list[str] = []  # auth kinds met that the suite cannot send, in order, once each
     items = _items(doc, "the collection's 'item'")
-    for item, folder, auth in _walk(items, "default", _auth(doc.get("auth")) or NO_SECURITY):
+    collection_auth = _auth(doc.get("auth")) or NO_SECURITY
+    for item, folder, auth in _walk(items, "default", collection_auth):
         request = item.get("request")
         if isinstance(request, str):
             request = {"url": request, "method": "GET"}
@@ -52,8 +55,10 @@ def load_postman(path: Path) -> ApiModel:
         operation_id = unique(to_identifier(str(item.get("name") or f"{method} {raw_path}")), taken)
         class_name = to_class_name(operation_id)
         effective = _auth(request.get("auth")) or auth
-        if security is NO_SECURITY and effective.kind in ("bearer", "basic", "apiKey"):
+        if security is NO_SECURITY and effective.kind in SUPPORTED_AUTH:
             security = effective
+        if effective.kind == "unsupported" and effective.name not in unsupported:
+            unsupported.append(effective.name)
         parameters = [
             Parameter(name=name, location="path", required=True, schema={"type": "string"},
                       examples=(path_examples[name],) if path_examples.get(name) else ())
@@ -63,7 +68,7 @@ def load_postman(path: Path) -> ApiModel:
             Parameter(name=key, location="query", required=False, schema={"type": "string"}, examples=(value,))
             for key, value in query
         ]
-        parameters += list(_headers(request.get("header"), variables))
+        parameters += list(_headers(request.get("header"), variables, notes, operation_id))
         operations.append(
             Operation(
                 operation_id=operation_id,
@@ -74,9 +79,13 @@ def load_postman(path: Path) -> ApiModel:
                 parameters=tuple(parameters),
                 body=_body(request.get("body"), method, variables, schemas, class_name),
                 responses=_responses(item.get("response") or [], schemas, class_name),
-                secured=effective.kind in ("bearer", "basic", "apiKey"),
+                secured=effective.kind in SUPPORTED_AUTH,
             )
         )
+    if security is NO_SECURITY:
+        # With a supported auth somewhere, the suite has credentials to send; without one, every kind the
+        # collection uses is a kind it cannot send, and the client should hear that before a red run.
+        notes += [UNSUPPORTED_SECURITY.format(what=f"{kind} auth") for kind in unsupported]
     return ApiModel(
         title=str(info.get("name") or path.stem),
         version=str(info.get("version") or ""),
@@ -84,6 +93,7 @@ def load_postman(path: Path) -> ApiModel:
         operations=tuple(operations),
         schemas=schemas,
         security=security,
+        notes=tuple(notes),
     )
 
 
@@ -108,7 +118,8 @@ def _walk(items: list[Any], folder: str, auth: Security, depth: int = 0) -> Iter
 
 
 def _auth(raw: Any) -> Security | None:
-    """None when there is no auth block; NO_SECURITY for `noauth`; UNSUPPORTED for kinds the suite cannot send."""
+    """None when there is no auth block; NO_SECURITY for `noauth`; for a kind the suite cannot send (digest,
+    oauth, a key anywhere but a header) a Security of kind "unsupported" whose name says which."""
     if not isinstance(raw, dict) or not raw.get("type"):
         return None
     kind = str(raw["type"]).lower()
@@ -120,10 +131,11 @@ def _auth(raw: Any) -> Security | None:
         return Security(kind="basic", name="basic", header="Authorization")
     if kind == "apikey":
         fields = {str(f.get("key")): str(f.get("value", "")) for f in raw.get("apikey") or [] if isinstance(f, dict)}
-        if fields.get("in") == "query":
-            return UNSUPPORTED
+        location = fields.get("in") or "header"
+        if location != "header":
+            return Security(kind="unsupported", name=f"apikey in {location}")
         return Security(kind="apiKey", name="apikey", header=fields.get("key") or "X-Api-Key", location="header")
-    return UNSUPPORTED
+    return Security(kind="unsupported", name=kind)
 
 
 def _substitute(text: str, variables: dict[str, str]) -> str:
@@ -190,7 +202,9 @@ def _query_pair(entry: dict[str, Any], variables: dict[str, str]) -> tuple[str, 
     return str(entry["key"]), _VARIABLE.sub(lambda m: "{" + m.group(1).strip() + "}", value)
 
 
-def _headers(raw: Any, variables: dict[str, str]) -> Iterator[Parameter]:
+def _headers(raw: Any, variables: dict[str, str], notes: list[str], operation_id: str) -> Iterator[Parameter]:
+    """The request's own headers, the ones the client fixture does not set. A value still holding a {{name}} the
+    collection cannot resolve is not sent at all - `{{trace}}` is never a header value - and a note says so."""
     if isinstance(raw, str):
         entries = [
             {"key": k.strip(), "value": v.strip()}
@@ -203,10 +217,13 @@ def _headers(raw: Any, variables: dict[str, str]) -> Iterator[Parameter]:
         key = str(entry.get("key") or "")
         if not key or entry.get("disabled") or key.lower() in DROPPED_HEADERS:
             continue
-        yield Parameter(
-            name=key, location="header", required=False, schema={"type": "string"},
-            examples=(_substitute(str(entry.get("value", "")), variables),),
-        )
+        value = _substitute(str(entry.get("value", "")), variables)
+        unresolved = _VARIABLE.search(value)
+        if unresolved:
+            variable = unresolved.group(0)
+            notes.append(f"{operation_id}: header {key!r} is not sent; {variable} is not a collection variable")
+            continue
+        yield Parameter(name=key, location="header", required=False, schema={"type": "string"}, examples=(value,))
 
 
 def _body(
@@ -243,6 +260,10 @@ def _body(
         return Body(
             content_type="application/octet-stream", schema={"type": "string", "format": "binary"}, required=True
         )
+    if mode:
+        # graphql, or a mode this loader does not know: the case is written skipped, with the mode in the reason,
+        # rather than sent without the body the collection gave it.
+        return Body(content_type=f"{mode} (a Postman body mode)", schema={}, required=True)
     return None
 
 

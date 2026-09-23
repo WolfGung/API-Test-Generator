@@ -78,6 +78,8 @@ def run(
     tests, operations = plural(summary.tests, "test"), plural(summary.operations, "operation")
     written = f"Wrote {tests} for {operations} to {out}"
     typer.echo(f"{written}: {', '.join(summary.modules)}" if summary.modules else written)
+    for line in summary.notes:
+        typer.echo(f"note: {line}")
     for line in summary.skipped:
         typer.echo(f"skipped: {line}")
 

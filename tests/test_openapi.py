@@ -212,3 +212,62 @@ def test_yaml_scalars_are_read_as_the_document_wrote_them(tmp_path):
         "nothing": None,
         "empty": None,
     }
+
+
+def load_text(tmp_path, name, text):
+    path = tmp_path / name
+    path.write_text(text)
+    return load_openapi(path)
+
+
+SECURED = """
+openapi: 3.0.3
+info: {title: Secured, version: "1"}
+security: [{main: []}]
+components:
+  securitySchemes:
+{schemes}
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200": {description: ok}
+"""
+
+
+def test_an_unsupported_security_scheme_leaves_a_note_and_no_credentials(tmp_path):
+    oauth = load_text(tmp_path, "oauth.yaml", SECURED.replace("{schemes}", "    main: {type: oauth2, flows: {}}"))
+    assert oauth.security.kind == "none"
+    assert oauth.notes == ("main (oauth2) security is not supported; the suite sends no credentials",)
+    schemes = "    main: {type: apiKey, in: query, name: key}\n    other: {type: http, scheme: digest}"
+    two = load_text(tmp_path, "two.yaml", SECURED.replace("{schemes}", schemes))
+    assert two.security.kind == "none"
+    assert two.notes == (
+        "main (apiKey in query) security is not supported; the suite sends no credentials",
+        "other (http digest) security is not supported; the suite sends no credentials",
+    )
+    in_cookie = "    main: {type: apiKey, in: cookie, name: k}"
+    cookie = load_text(tmp_path, "cookie.yaml", SECURED.replace("{schemes}", in_cookie))
+    assert cookie.security.kind == "none" and len(cookie.notes) == 1
+
+
+def test_a_supported_scheme_beside_an_unsupported_one_needs_no_note(small):
+    assert small.security.kind == "bearer"
+    assert [note for note in small.notes if "security" in note] == []
+
+
+def test_a_cookie_parameter_is_dropped_with_a_note_naming_it(small, tmp_path):
+    """SMALL declares `session` in a cookie at path level; a cookie parameter of an operation's own is named by
+    the operation. Neither is sent (see the parameters test above), and the note says so."""
+    assert small.notes == ("/things/{id}: cookie parameter 'session' is not supported and is not sent",)
+    own = SMALL.replace(
+        "        - $ref: \"#/components/parameters/Verbose\"\n",
+        "        - $ref: \"#/components/parameters/Verbose\"\n"
+        "        - {name: theme, in: cookie, schema: {type: string}}\n",
+    )
+    api = load_text(tmp_path, "own.yaml", own)
+    assert api.notes == (
+        "/things/{id}: cookie parameter 'session' is not supported and is not sent",
+        "get_thing: cookie parameter 'theme' is not supported and is not sent",
+    )

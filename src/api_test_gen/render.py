@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -317,10 +318,12 @@ def render_readme(
     env_lines: list[str],
     modules: list[str],
     out_hint: str,
+    notes: Iterable[str] = (),
 ) -> str:
     template = _environment().get_template("README.md.j2")
     return template.render(
         source_name=source_name, title=api.title, version=api.version, security=api.security,
         summary_lines=summary_lines, env_lines=env_lines, modules=modules,
         has_models=bool(api.schemas), out_hint=out_hint, declares_required=declares_required(api),
+        notes=list(notes),
     )

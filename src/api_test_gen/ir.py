@@ -61,6 +61,9 @@ class Security:
     location: str = "header"  # apiKey only; keys in a query string or a cookie are not supported
 
 
+UNSUPPORTED_SECURITY = "{what} is not supported; the suite sends no credentials"
+
+
 NO_SECURITY = Security(kind="none")
 
 
@@ -104,6 +107,7 @@ class ApiModel:
     operations: tuple[Operation, ...]
     schemas: dict[str, dict[str, Any]] = field(default_factory=dict)
     security: Security = NO_SECURITY
+    notes: tuple[str, ...] = ()  # what the suite cannot do with this document, one sentence each
 
     def resolve(self, schema: dict[str, Any]) -> dict[str, Any]:
         """Follow `$ref` to the named schema it points at, any depth; anything else comes back as it is."""

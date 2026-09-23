@@ -281,13 +281,21 @@ def test_a_long_title_and_base_url_keep_the_conftest_lint_clean(tmp_path):
     assert ast.get_docstring(module, clean=False).startswith("Fixtures for the suite generated from s.yaml (TTT")
 
 
-def readme_text(api: ApiModel) -> str:
+def readme_text(api: ApiModel, notes: list[str] = []) -> str:  # noqa: B006 - never mutated
     """The README generated for `api`, as one line: its paragraphs are hard-wrapped."""
     text = render_readme(
         api, source_name="d.json", summary_lines=["1 operation, 1 test in 1 module."],
-        env_lines=["API_BASE_URL=..."], modules=["test_default.py"], out_hint="out",
+        env_lines=["API_BASE_URL=..."], modules=["test_default.py"], out_hint="out", notes=notes,
     )
     return " ".join(text.split())
+
+
+def test_notes_stand_between_the_run_command_and_the_rest_of_the_readme():
+    api = ApiModel(title="T", version="1", base_url="", operations=(), security=Security(kind="bearer", name="b"))
+    text = readme_text(api, ["first note.", "second note."])
+    run = text.index("pytest out ```")
+    assert run < text.index("first note.") < text.index("second note.") < text.index("Without credentials")
+    assert "first note" not in readme_text(api)
 
 
 NEGATIVES = "one negative case per required query or header parameter and per required body field"

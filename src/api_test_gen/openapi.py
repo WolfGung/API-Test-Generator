@@ -9,7 +9,19 @@ from typing import Any
 
 import yaml
 
-from .ir import NO_SECURITY, ApiModel, Body, Operation, Parameter, Response, Security, SpecError, is_json_media, ref_to
+from .ir import (
+    NO_SECURITY,
+    UNSUPPORTED_SECURITY,
+    ApiModel,
+    Body,
+    Operation,
+    Parameter,
+    Response,
+    Security,
+    SpecError,
+    is_json_media,
+    ref_to,
+)
 from .naming import to_class_name, to_identifier, unique
 
 METHODS = ("get", "put", "post", "delete", "patch", "head", "options")
@@ -72,15 +84,16 @@ def load_openapi(path: Path) -> ApiModel:
     document_security = doc.get("security")
     operations: list[Operation] = []
     taken_ids: set[str] = set()
+    security, notes = _security(components.get("securitySchemes") or {})
     for raw_path, item in (doc.get("paths") or {}).items():
         if not isinstance(item, dict):
             continue
-        shared = [_parameter(p, components) for p in item.get("parameters") or []]
+        shared = [_parameter(p, components, notes, raw_path) for p in item.get("parameters") or []]
         for method, raw_op in item.items():  # document order, so the suite reads like the document
             if method not in METHODS or not isinstance(raw_op, dict):
                 continue
-            own = [_parameter(p, components) for p in raw_op.get("parameters") or []]
             operation_id = unique(to_identifier(raw_op.get("operationId") or f"{method} {raw_path}"), taken_ids)
+            own = [_parameter(p, components, notes, operation_id) for p in raw_op.get("parameters") or []]
             class_name = to_class_name(operation_id)
             requirements = raw_op.get("security", document_security)
             operations.append(
@@ -105,7 +118,8 @@ def load_openapi(path: Path) -> ApiModel:
         base_url=_base_url(doc.get("servers") or []),
         operations=tuple(operations),
         schemas=schemas,
-        security=_security(components.get("securitySchemes") or {}),
+        security=security,
+        notes=tuple(notes),
     )
 
 
@@ -147,9 +161,14 @@ def _resolved(schema: dict[str, Any], components: dict[str, Any]) -> dict[str, A
     return schema
 
 
-def _parameter(raw: dict[str, Any], components: dict[str, Any]) -> Parameter | None:
+def _parameter(raw: dict[str, Any], components: dict[str, Any], notes: list[str], where: str) -> Parameter | None:
+    """A path, query or header parameter; a cookie parameter is dropped with a note naming it under `where`
+    (the operation, or the path for a path-level parameter), since nothing in the suite would send it."""
     raw = _component(raw, components)
     location = raw.get("in")
+    if location == "cookie":
+        notes.append(f"{where}: cookie parameter {str(raw.get('name'))!r} is not supported and is not sent")
+        return None
     if location not in ("path", "query", "header"):
         return None
     schema = raw.get("schema")
@@ -216,16 +235,31 @@ def _response(
     return Response(status=status, schema=schema or None, content_type=content_type, description=description)
 
 
-def _security(schemes: dict[str, Any]) -> Security:
+def _security(schemes: dict[str, Any]) -> tuple[Security, list[str]]:
+    """The first supported scheme (bearer, basic, an API key in a header), with no notes; or no security and one
+    note per scheme the suite cannot send - an OAuth flow, digest, a key in a query string or a cookie."""
     for name, scheme in schemes.items():
         kind = scheme.get("type")
         if kind == "http" and str(scheme.get("scheme", "")).lower() == "bearer":
-            return Security(kind="bearer", name=name, header="Authorization")
+            return Security(kind="bearer", name=name, header="Authorization"), []
         if kind == "http" and str(scheme.get("scheme", "")).lower() == "basic":
-            return Security(kind="basic", name=name, header="Authorization")
+            return Security(kind="basic", name=name, header="Authorization"), []
         if kind == "apiKey" and scheme.get("in") == "header":
-            return Security(kind="apiKey", name=name, header=str(scheme["name"]), location="header")
-    return NO_SECURITY
+            return Security(kind="apiKey", name=name, header=str(scheme["name"]), location="header"), []
+    notes = [
+        UNSUPPORTED_SECURITY.format(what=f"{name} ({_describe(scheme)}) security") for name, scheme in schemes.items()
+    ]
+    return NO_SECURITY, notes
+
+
+def _describe(scheme: dict[str, Any]) -> str:
+    """`oauth2`, `http digest`, `apiKey in query`: the scheme as the document declares it."""
+    kind = str(scheme.get("type") or "")
+    if kind == "http":
+        return f"http {scheme.get('scheme', '')}".strip()
+    if kind == "apiKey":
+        return f"apiKey in {scheme.get('in', '')}".strip()
+    return kind
 
 
 def _base_url(servers: list[dict[str, Any]]) -> str:

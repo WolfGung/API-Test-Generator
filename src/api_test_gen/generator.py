@@ -40,6 +40,7 @@ class Summary:
     tests: int
     modules: tuple[str, ...]
     skipped: tuple[str, ...]  # "<operation_id>: <reason>" for every positive case that is written skipped
+    notes: tuple[str, ...]  # what the suite cannot do: the document's notes, plus a server URL it cannot reach
 
 
 def generate(
@@ -88,9 +89,10 @@ def generate(
             source_name=source_name,
         )
         modules.append(module)
+    effective_base_url = api.base_url if base_url is None else base_url
+    notes = [*api.notes, *_base_url_notes(effective_base_url)]
     files["conftest.py"] = render_conftest(
-        api, source_name=source_name, base_url=api.base_url if base_url is None else base_url,
-        markers=list(markers.values()),
+        api, source_name=source_name, base_url=effective_base_url, markers=list(markers.values()),
     )
     if api.schemas:
         files["models.py"] = generate_models(api, source_name)
@@ -103,6 +105,7 @@ def generate(
         env_lines=["API_BASE_URL=...", *ENV_HINTS.get(api.security.kind, [])],
         modules=modules,
         out_hint=out.name or ".",
+        notes=notes,
     )
     # Only now, with every file rendered, is the directory touched: a failure above leaves it as it was.
     if overwrite and out.is_dir():
@@ -114,4 +117,16 @@ def generate(
     out.mkdir(parents=True, exist_ok=True)
     for name, content in files.items():
         (out / name).write_text(content, encoding="utf-8")
-    return Summary(operations=len(operations), tests=tests, modules=tuple(modules), skipped=tuple(skipped))
+    return Summary(
+        operations=len(operations), tests=tests, modules=tuple(modules), skipped=tuple(skipped), notes=tuple(notes)
+    )
+
+
+def _base_url_notes(base_url: str) -> list[str]:
+    """A default BASE_URL the client cannot use: none at all, or a relative one like Petstore's `/api/v3`, on
+    which httpx raises at the first request. Either way API_BASE_URL has to be set, and the note says so."""
+    if not base_url:
+        return ["the document names no server: API_BASE_URL is required to run the suite"]
+    if "://" not in base_url:
+        return [f"the suite's default server URL {base_url!r} has no host: API_BASE_URL is required to run it"]
+    return []

@@ -11,6 +11,10 @@ pip install pytest httpx pydantic
 {{ env_lines | join(" ") }} pytest {{ out_hint }}
 ```
 
+{% for note in notes %}
+{{ note }}
+
+{% endfor %}
 {% if security.kind != "none" %}
 Without credentials the secured operations are skipped, not failed, so a run
 without them still tells you what the unsecured surface does.

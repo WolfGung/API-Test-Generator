@@ -38,7 +38,10 @@ def test_a_document_without_operations_is_reported_without_a_module_list(tmp_pat
     out = tmp_path / "suite"
     result = runner.invoke(app, ["--spec", str(empty), "--out", str(out)])
     assert result.exit_code == 0, result.output
-    assert result.output.splitlines() == [f"Wrote 0 tests for 0 operations to {out}"]
+    assert result.output.splitlines() == [
+        f"Wrote 0 tests for 0 operations to {out}",
+        "note: the document names no server: API_BASE_URL is required to run the suite",
+    ]
 
 
 def test_exactly_one_input_is_required(tmp_path):
@@ -205,3 +208,38 @@ def test_any_other_failure_is_reported_as_an_error_line_without_a_traceback(tmp_
     assert "Traceback" not in result.output
     assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
     assert not out.exists()
+
+
+OAUTH_ONLY = """
+openapi: 3.0.3
+info: {title: OAuth, version: "1"}
+servers: [{url: /v1}]
+security: [{oauth: [read]}]
+components:
+  securitySchemes:
+    oauth: {type: oauth2, flows: {}}
+paths:
+  /things:
+    get:
+      operationId: listThings
+      parameters:
+        - {name: session, in: cookie, schema: {type: string}}
+      responses:
+        "200": {description: ok}
+"""
+
+
+def test_what_the_suite_cannot_do_is_printed_as_note_lines(tmp_path):
+    spec = tmp_path / "oauth.yaml"
+    spec.write_text(OAUTH_ONLY)
+    out = tmp_path / "suite"
+    result = runner.invoke(app, ["--spec", str(spec), "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        f"Wrote 1 test for 1 operation to {out}: test_default.py",
+        "note: oauth (oauth2) security is not supported; the suite sends no credentials",
+        "note: list_things: cookie parameter 'session' is not supported and is not sent",
+        "note: the suite's default server URL '/v1' has no host: API_BASE_URL is required to run it",
+    ]
+    readme = (out / "README.md").read_text()
+    assert "\noauth (oauth2) security is not supported; the suite sends no credentials\n" in readme

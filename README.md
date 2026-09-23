@@ -90,10 +90,11 @@ An operation with a form, multipart or binary body gets a test marked `skip`, wi
 ## What is not generated
 
 - **Path parameters get no negative case.** Leaving one out changes the route, not the request.
+- **Cookie parameters.** A parameter with `in: cookie` is not sent; the generator prints a `note:` naming it.
 - **Bodies that are not JSON or plain text.** Form, multipart and binary bodies produce a positive test marked `skip` with the reason in it, so the gap is visible in the run rather than silent.
 - **Values that satisfy a `pattern`, `multipleOf`, `uniqueItems`, `exclusiveMaximum` or a rule across fields.** Of the constraints, the sampler honours `minimum`, `exclusiveMinimum`, `maximum`, `minLength`, `maxLength` and `minItems`; its values are plausible, not exhaustive, and a document that carries examples gets a better suite.
 - **Chains.** Nothing creates a resource and then reads it back; every case stands alone against whatever state the server has, which is why the sample API's delete is idempotent.
-- **Authentication other than bearer, basic and an API key in a header.** Digest, OAuth flows and keys in a query string leave the operation unsecured in the generated suite: its requests go out without credentials, and a server that insists on them will say so.
+- **Authentication other than bearer, basic and an API key in a header.** Digest, OAuth flows and keys in a query string or a cookie leave the operation unsecured in the generated suite: the generator prints a `note:` saying so and the suite's README repeats it, its requests go out without credentials, and a server that insists on them will say so.
 - **Response headers, timing, and anything the document does not say.**
 
 ## How the proof is run

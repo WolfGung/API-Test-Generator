@@ -150,3 +150,36 @@ def test_yaml_dates_and_switches_reach_the_suite_as_the_strings_the_document_wro
     assert 'Switch = Literal["on", "off"]' in models
     module = load_module(out / "models.py")
     assert module.Report.model_validate({"day": "2024-01-31", "switch": "off"}).switch == "off"
+
+
+def test_the_notes_of_the_document_reach_the_summary_and_the_readme(tmp_path):
+    path = tmp_path / "cookie.yaml"
+    cookie = "      parameters: [{name: s, in: cookie, schema: {}}]\n      responses:"
+    path.write_text(NO_SCHEMAS.replace("      responses:", cookie))
+    out = tmp_path / "out"
+    summary = generate(load_openapi(path), out, source_name="cookie.yaml", base_url="http://127.0.0.1:9")
+    note = "get_health: cookie parameter 's' is not supported and is not sent"
+    assert summary.notes == (note,)
+    assert f"\n{note}\n" in (out / "README.md").read_text()
+
+
+@pytest.mark.parametrize(
+    "base_url, note",
+    [
+        ("/api/v3", "the suite's default server URL '/api/v3' has no host: API_BASE_URL is required to run it"),
+        ("", "the document names no server: API_BASE_URL is required to run the suite"),
+        ("https://api.example.com/v1", None),
+    ],
+    ids=["relative", "none", "absolute"],
+)
+def test_a_server_url_without_a_host_is_noted_on_the_command_line_and_in_the_readme(tmp_path, base_url, note):
+    """Petstore's `servers: [{url: /api/v3}]` would be the conftest's default BASE_URL and httpx would raise on
+    the first request; the note says what to set. `--base-url` with a host clears it."""
+    path = tmp_path / "bare.yaml"
+    path.write_text(NO_SCHEMAS)  # no servers at all
+    out = tmp_path / "out"
+    summary = generate(load_openapi(path), out, source_name="bare.yaml", base_url=base_url)
+    readme = (out / "README.md").read_text()
+    assert summary.notes == ((note,) if note else ())
+    assert (f"\n{note}\n" in readme) is (note is not None)
+    assert "API_BASE_URL is required" not in readme or note is not None
