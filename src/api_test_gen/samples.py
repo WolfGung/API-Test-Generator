@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .ir import ApiModel, ref_name
+from .ir import ApiModel, ref_name, required_names
 
 FORMAT_SAMPLES: dict[str, Any] = {
     "email": "user@example.com",
@@ -32,8 +32,8 @@ def sample_for(schema: dict[str, Any], api: ApiModel, depth: int = 0, expanding:
     if depth > MAX_DEPTH:
         return None
     ref = schema.get("$ref")
-    if ref is not None:
-        name = ref_name(ref)
+    name = ref_name(ref) if ref is not None else None
+    if name is not None:
         if name in expanding:
             return None  # a cycle through this reference: no finite sample to offer
         expanding = expanding | {name}
@@ -85,7 +85,7 @@ def sample_for(schema: dict[str, Any], api: ApiModel, depth: int = 0, expanding:
             return []  # e.g. a list of a self-referencing type: no finite item, so an empty list stands in
         return [item] * max(1, int(schema.get("minItems") or 0))
     if kind == "object":
-        return _object(schema, api, depth, expanding)
+        return _object(schema, api, depth, expanding, name)
     return None
 
 
@@ -94,17 +94,19 @@ def required_fields(schema: dict[str, Any], api: ApiModel) -> list[str]:
     in document order, without duplicates. This mirrors exactly what `sample_for`'s own `allOf` merge puts
     into the sample, so the sampler and the negative cases generated from it agree on what "required" means.
     """
+    ref = schema.get("$ref")
+    name = ref_name(ref) if ref is not None else None
     schema = api.resolve(schema)
     fields: list[str] = []
     if "allOf" in schema:
         for part in schema["allOf"]:
-            for name in required_fields(part, api):
-                if name not in fields:
-                    fields.append(name)
+            for field in required_fields(part, api):
+                if field not in fields:
+                    fields.append(field)
         return fields
-    for name in schema.get("required") or []:
-        if name not in fields:
-            fields.append(name)
+    for field in required_names(schema, name):
+        if field not in fields:
+            fields.append(field)
     return fields
 
 
@@ -147,9 +149,11 @@ def has_example(schema: dict[str, Any]) -> bool:
     return any(key in schema for key in ("example", "examples", "default", "const"))
 
 
-def _object(schema: dict[str, Any], api: ApiModel, depth: int, expanding: frozenset[str]) -> dict[str, Any]:
+def _object(
+    schema: dict[str, Any], api: ApiModel, depth: int, expanding: frozenset[str], name: str | None
+) -> dict[str, Any]:
     properties = schema.get("properties") or {}
-    required = [name for name in schema.get("required") or [] if name in properties]
+    required = [field for field in required_names(schema, name) if field in properties]
     optional = [name for name in properties if name not in required and has_example(api.resolve(properties[name]))]
     wanted = required + optional
     return {name: sample_for(properties[name], api, depth + 1, expanding) for name in wanted}

@@ -1,4 +1,6 @@
-from api_test_gen.ir import ApiModel
+import pytest
+
+from api_test_gen.ir import ApiModel, SpecError
 from api_test_gen.samples import required_fields, sample_for
 
 API = ApiModel(
@@ -126,3 +128,16 @@ def test_required_fields_flattens_allof_through_refs_in_document_order_without_d
     assert required_fields({"$ref": "#/components/schemas/Person"}, api) == ["name", "age"]
     assert required_fields({"type": "object", "required": ["x"]}, api) == ["x"]
     assert required_fields({}, api) == []
+
+
+def test_a_required_that_is_not_a_list_is_a_document_error_naming_the_schema():
+    inline = {"type": "object", "required": True, "properties": {"name": {"type": "string"}}}
+    with pytest.raises(SpecError, match="the object schema with properties name: 'required' must be a list"):
+        sample(inline)
+    with pytest.raises(SpecError, match="'required' must be a list of property names, not True"):
+        required_fields(inline, API)
+    api = ApiModel(title="t", version="1", base_url="", operations=(), schemas={"Thing": inline})
+    with pytest.raises(SpecError, match="schema 'Thing': 'required' must be a list of property names, not True"):
+        sample_for({"$ref": "#/components/schemas/Thing"}, api)
+    with pytest.raises(SpecError, match="schema 'Thing': 'required' must be a list"):
+        required_fields({"$ref": "#/components/schemas/Thing"}, api)

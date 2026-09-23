@@ -185,3 +185,10 @@ def test_parameter_examples_fall_back_to_the_schema_with_a_reference_followed(tm
     assert by_name["page"].examples == ()  # a default is not an example; the case builder still sends it
     assert by_name["q"].examples == ("given",)  # the parameter's own, when it has one
     assert by_name["sort"].examples == ()
+
+
+def test_a_file_that_is_not_utf8_is_refused(tmp_path):
+    path = tmp_path / "latin1.yaml"
+    path.write_bytes("openapi: 3.0.3\ninfo: {title: Café, version: '1'}\npaths: {}\n".encode("latin-1"))
+    with pytest.raises(SpecError, match="not UTF-8 text"):
+        load_openapi(path)

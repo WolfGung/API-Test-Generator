@@ -261,3 +261,14 @@ def test_postman_echo_facts():
     assert by_id["post_request"].body.examples[0].startswith("Duis")
     assert by_id["get_request"].body is None
     assert by_id["get_request"].success.status == "2XX"
+
+
+def test_an_item_that_is_not_a_list_is_refused_naming_the_folder(tmp_path):
+    v2_1 = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    path = tmp_path / "folder.postman_collection.json"
+    path.write_text(json.dumps({"info": {"name": "F", "schema": v2_1}, "item": [{"name": "Things", "item": None}]}))
+    with pytest.raises(SpecError, match="folder 'Things': 'item' is not a list"):
+        load_postman(path)
+    path.write_text(json.dumps({"info": {"name": "F", "schema": v2_1}, "item": None}))
+    with pytest.raises(SpecError, match="the collection's 'item' is not a list"):
+        load_postman(path)

@@ -7,7 +7,7 @@ import json
 import re
 from typing import Any
 
-from .ir import ApiModel, ref_name
+from .ir import ApiModel, SpecError, ref_name, required_names
 from .naming import to_class_name, to_identifier, unique
 from .openapi import register_schema
 
@@ -161,9 +161,22 @@ class _Writer:
         return "Any"
 
     def resolve(self, schema: dict[str, Any]) -> dict[str, Any]:
+        """Follow `$ref` to the named schema, any depth, with the same guards as `ApiModel.resolve`: a name the
+        document does not have and a pure `$ref` cycle are document errors, not a KeyError or an endless loop."""
+        hops = 0
         while "$ref" in schema:
-            schema = self.schemas[ref_name(schema["$ref"])]
+            schema = self.schemas[self.target(schema["$ref"])]
+            hops += 1
+            if hops > 50:
+                raise SpecError(f"reference loop at {schema.get('$ref')!r}")
         return schema
+
+    def target(self, ref: str) -> str:
+        """The schema name a `$ref` points at, refused when the document has no schema of that name."""
+        name = ref_name(ref)
+        if name not in self.schemas:
+            raise SpecError(f"unresolved reference {ref!r}")
+        return name
 
     def is_class(self, name: str) -> bool:
         """A class is written for a schema with properties, or an allOf with an object part (after resolving
@@ -194,7 +207,7 @@ class _Writer:
         if not isinstance(schema, dict) or not schema:
             return self.any()
         if "$ref" in schema:
-            expr = self.names[ref_name(schema["$ref"])]
+            expr = self.names[self.target(schema["$ref"])]
             return f"{expr} | None" if _is_nullable(self.resolve(schema)) else expr
         nullable = bool(schema.get("nullable"))
         if "allOf" in schema:
@@ -241,29 +254,29 @@ class _Writer:
         return f"{expr} | None" if nullable and not expr.endswith("| None") else expr
 
     def _flatten(
-        self, schema: dict[str, Any], visited: frozenset[str] = frozenset()
+        self, schema: dict[str, Any], visited: frozenset[str] = frozenset(), name: str | None = None
     ) -> tuple[dict[str, Any], list[str]]:
         """Properties and required names, with `allOf` parts merged in (references resolved). `visited` holds
         the schema names already on this path - the class this started from, plus every `$ref` followed to get
         here - so a part whose `$ref` names one of them contributes nothing, ending a cycle instead of
-        recursing forever."""
+        recursing forever. `name` is what an error about this schema's own `required` calls it."""
         properties: dict[str, Any] = {}
         required: list[str] = []
         for part in schema.get("allOf") or []:
-            target = ref_name(part["$ref"]) if isinstance(part, dict) and "$ref" in part else None
+            target = self.target(part["$ref"]) if isinstance(part, dict) and "$ref" in part else None
             if target is not None and target in visited:
                 continue
             part_visited = visited | {target} if target is not None else visited
-            part_properties, part_required = self._flatten(self.resolve(part), part_visited)
+            part_properties, part_required = self._flatten(self.resolve(part), part_visited, target)
             properties.update(part_properties)
-            required += [name for name in part_required if name not in required]
+            required += [field for field in part_required if field not in required]
         properties.update(schema.get("properties") or {})
-        required += [name for name in schema.get("required") or [] if name not in required]
+        required += [field for field in required_names(schema, name) if field not in required]
         return properties, required
 
     def class_block(self, name: str) -> list[str]:
         schema = self.schemas[name]
-        properties, required = self._flatten(schema, frozenset({name}))
+        properties, required = self._flatten(schema, frozenset({name}), name)
         self.pydantic_used.add("BaseModel")
         lines = [f"class {self.names[name]}(BaseModel):", f'    """{_docline(schema, self.names[name])}"""']
         config: list[str] = []

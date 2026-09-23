@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from api_test_gen.ir import ApiModel
+from api_test_gen.ir import ApiModel, SpecError
 from api_test_gen.models import generate_models
 from api_test_gen.openapi import load_openapi
 from tests.helpers import load_module, ruff_check
@@ -391,3 +391,36 @@ def test_flatten_handles_a_shallower_cyclic_allof_too(tmp_path):
     models = load_module(path)
     assert models.A.model_validate({"x": "v"}).x == "v"
     assert models.B.model_validate({"x": "v"}).x == "v"
+
+
+def test_a_dangling_or_cyclic_reference_is_a_document_error_not_a_crash():
+    """A `$ref` to a schema the document does not have, and a pure `$ref` cycle (A -> B -> A, no class on the
+    way), are refused as document errors: a KeyError or an endless loop would reach the client as a
+    traceback."""
+    dangling = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={"Thing": {"type": "object", "properties": {"owner": {"$ref": "#/components/schemas/Missing"}}}},
+    )
+    with pytest.raises(SpecError, match="unresolved reference '#/components/schemas/Missing'"):
+        generate_models(dangling, "dangling.yaml")
+    cycle = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={"A": {"$ref": "#/components/schemas/B"}, "B": {"$ref": "#/components/schemas/A"}},
+    )
+    with pytest.raises(SpecError, match="reference loop at"):
+        generate_models(cycle, "cycle.yaml")
+    listed = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={"Things": {"type": "array", "items": {"$ref": "#/components/schemas/Nope"}}},
+    )
+    with pytest.raises(SpecError, match="unresolved reference"):
+        generate_models(listed, "listed.yaml")
+
+
+def test_a_required_that_is_not_a_list_is_a_document_error_naming_the_schema():
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={"Thing": {"type": "object", "required": True, "properties": {"name": {"type": "string"}}}},
+    )
+    with pytest.raises(SpecError, match="schema 'Thing': 'required' must be a list of property names, not True"):
+        generate_models(api, "required.yaml")

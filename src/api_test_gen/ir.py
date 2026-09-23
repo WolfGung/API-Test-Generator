@@ -134,5 +134,30 @@ def ref_name(ref: str) -> str:
     return ref[len(SCHEMA_REF_PREFIX) :]
 
 
+def describe_schema(schema: dict[str, Any], name: str | None = None) -> str:
+    """How an error names a schema: by its component name, else its title, else its properties."""
+    if name is not None:
+        return f"schema {name!r}"
+    if schema.get("title"):
+        return f"schema {str(schema['title'])!r}"
+    properties = schema.get("properties")
+    if isinstance(properties, dict) and properties:
+        return f"the object schema with properties {', '.join(map(str, properties))}"
+    return "an inline object schema"
+
+
+def required_names(schema: dict[str, Any], name: str | None = None) -> list[str]:
+    """The schema's `required` list, or an empty one when it has none; anything else (`required: true`, the
+    draft-3 spelling) is a document error naming the schema, not a TypeError on the way to a sample."""
+    value = schema.get("required")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SpecError(
+            f"{describe_schema(schema, name)}: 'required' must be a list of property names, not {value!r}"
+        )
+    return [str(field) for field in value]
+
+
 def ref_to(name: str) -> dict[str, str]:
     return {"$ref": f"{SCHEMA_REF_PREFIX}{name}"}

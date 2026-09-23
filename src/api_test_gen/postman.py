@@ -28,14 +28,15 @@ def load_postman(path: Path) -> ApiModel:
     info = doc.get("info") or {}
     schema = str(info.get("schema") or "")
     if not any(marker in schema for marker in SUPPORTED_SCHEMAS):
-        raise SpecError(f"{path}: expected a Postman collection v2.0 or v2.1, found schema {schema!r}")
+        raise SpecError(f"expected a Postman collection v2.0 or v2.1, found schema {schema!r}")
     variables = {str(v["key"]): str(v.get("value", "")) for v in doc.get("variable") or [] if v.get("key")}
     schemas: dict[str, dict[str, Any]] = {}
     operations: list[Operation] = []
     taken: set[str] = set()
     base_url = ""
     security = NO_SECURITY
-    for item, folder, auth in _walk(doc.get("item") or [], "default", _auth(doc.get("auth")) or NO_SECURITY):
+    items = _items(doc, "the collection's 'item'")
+    for item, folder, auth in _walk(items, "default", _auth(doc.get("auth")) or NO_SECURITY):
         request = item.get("request")
         if isinstance(request, str):
             request = {"url": request, "method": "GET"}
@@ -85,13 +86,22 @@ def load_postman(path: Path) -> ApiModel:
     )
 
 
+def _items(holder: dict[str, Any], what: str) -> list[Any]:
+    """The `item` list of the collection or of a folder: absent means empty; anything but a list is refused."""
+    items = holder.get("item", [])
+    if not isinstance(items, list):
+        raise SpecError(f"{what} is not a list")
+    return items
+
+
 def _walk(items: list[Any], folder: str, auth: Security, depth: int = 0) -> Iterator[tuple[dict, str, Security]]:
     for item in items:
         if not isinstance(item, dict):
             continue
         if "item" in item:
             own_folder = str(item.get("name") or folder) if depth == 0 else folder
-            yield from _walk(item["item"], own_folder, _auth(item.get("auth")) or auth, depth + 1)
+            children = _items(item, f"folder {str(item.get('name') or '')!r}: 'item'")
+            yield from _walk(children, own_folder, _auth(item.get("auth")) or auth, depth + 1)
         else:
             yield item, folder, auth
 

@@ -17,6 +17,7 @@ from .postman import load_postman
 app = typer.Typer(
     add_completion=False,
     rich_markup_mode=None,
+    pretty_exceptions_enable=False,  # a failure is one `error:` line, never a traceback with local variables
     help="Turn an OpenAPI 3 document or a Postman collection into a pytest suite with response validation.",
 )
 
@@ -65,8 +66,14 @@ def run(
             api, out, source_name=source.name, base_url=base_url, overwrite=overwrite,
             include_tags=include_tag or (), exclude_tags=exclude_tag or (),
         )
-    except (SpecError, OutputExists, UnknownTag) as exc:
+    except SpecError as exc:
+        typer.echo(f"error: {source}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except (OutputExists, UnknownTag) as exc:
         typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:  # the backstop: whatever slipped past the loaders is still one line, not a traceback
+        typer.echo(f"error: cannot generate from {source}: {type(exc).__name__}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     tests, operations = plural(summary.tests, "test"), plural(summary.operations, "operation")
     written = f"Wrote {tests} for {operations} to {out}"

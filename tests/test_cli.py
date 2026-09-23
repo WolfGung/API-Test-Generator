@@ -1,3 +1,7 @@
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -5,6 +9,7 @@ from typer.testing import CliRunner
 from api_test_gen import __version__
 from api_test_gen.cli import app
 from tests.documents import BOOKISH
+from tests.helpers import REPO
 
 runner = CliRunner()
 
@@ -76,3 +81,127 @@ def test_out_at_a_file_is_a_usage_error_without_a_traceback(tmp_path):
 def test_version():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0 and result.output.strip() == f"api-test-gen {__version__}"
+
+
+# --- Refusals: a malformed document is refused with an `error:` line naming the file and the cause. ----------
+
+DANGLING_REF = """
+openapi: 3.0.3
+info: {title: Dangling, version: "1"}
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: object, properties: {owner: {$ref: "#/components/schemas/Missing"}}}
+"""
+
+REF_CYCLE = """
+openapi: 3.0.3
+info: {title: Cycle, version: "1"}
+components:
+  schemas:
+    A: {$ref: "#/components/schemas/B"}
+    B: {$ref: "#/components/schemas/A"}
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: "#/components/schemas/A"}}}}
+"""
+
+REQUIRED_TRUE = """
+openapi: 3.0.3
+info: {title: Required, version: "1"}
+paths:
+  /things:
+    post:
+      operationId: createThing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: true, properties: {name: {type: string}}}
+      responses:
+        "201": {description: made}
+"""
+
+
+def run_cli(*arguments: str, timeout: float = 20) -> subprocess.CompletedProcess[str]:
+    """The command line in a subprocess, so a run that never finishes fails by timeout instead of stalling
+    the suite."""
+    return subprocess.run(
+        [sys.executable, "-c", "from api_test_gen.cli import main; main()", *arguments],
+        capture_output=True, text=True, timeout=timeout, check=False, cwd=REPO,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+
+
+def refused(result, spec: Path, cause: str, out: Path) -> None:
+    assert result.exit_code == 1, result.output
+    assert f"error: {spec}: {cause}" in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    assert not out.exists()
+
+
+def test_a_dangling_reference_is_refused_naming_the_file_and_the_reference(tmp_path):
+    spec = tmp_path / "dangling.yaml"
+    spec.write_text(DANGLING_REF)
+    out = tmp_path / "x"
+    result = runner.invoke(app, ["--spec", str(spec), "--out", str(out)])
+    refused(result, spec, "unresolved reference '#/components/schemas/Missing'", out)
+
+
+def test_a_reference_cycle_is_refused_and_the_command_finishes(tmp_path):
+    spec = tmp_path / "cycle.yaml"
+    spec.write_text(REF_CYCLE)
+    out = tmp_path / "x"
+    result = run_cli("--spec", str(spec), "--out", str(out))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"error: {spec}: reference loop at " in result.stderr, result.stderr
+    assert "Traceback" not in result.stderr and not out.exists()
+
+
+def test_a_required_that_is_not_a_list_is_refused_naming_the_schema(tmp_path):
+    spec = tmp_path / "required.yaml"
+    spec.write_text(REQUIRED_TRUE)
+    out = tmp_path / "x"
+    result = runner.invoke(app, ["--spec", str(spec), "--out", str(out)])
+    refused(result, spec, "schema 'CreateThingRequest': 'required' must be a list of property names, not True", out)
+
+
+def test_a_file_that_is_not_utf8_is_refused(tmp_path):
+    spec = tmp_path / "latin1.yaml"
+    spec.write_bytes("openapi: 3.0.3\ninfo: {title: Café, version: '1'}\npaths: {}\n".encode("latin-1"))
+    out = tmp_path / "x"
+    result = runner.invoke(app, ["--spec", str(spec), "--out", str(out)])
+    refused(result, spec, "not UTF-8 text", out)
+
+
+def test_a_collection_whose_item_is_null_is_refused(tmp_path):
+    collection = tmp_path / "null.postman_collection.json"
+    v2_1 = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    collection.write_text(json.dumps({"info": {"name": "Null", "schema": v2_1}, "item": None}))
+    out = tmp_path / "x"
+    result = runner.invoke(app, ["--postman", str(collection), "--out", str(out)])
+    refused(result, collection, "the collection's 'item' is not a list", out)
+
+
+def test_any_other_failure_is_reported_as_an_error_line_without_a_traceback(tmp_path, monkeypatch):
+    def broken(*_, **__):
+        raise RuntimeError("rendering broke")
+
+    monkeypatch.setattr("api_test_gen.cli.generate", broken)
+    spec = write(tmp_path)
+    out = tmp_path / "x"
+    result = runner.invoke(app, ["--spec", str(spec), "--out", str(out)])
+    assert result.exit_code == 1, result.output
+    assert f"error: cannot generate from {spec}: RuntimeError: rendering broke" in result.output
+    assert "Traceback" not in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    assert not out.exists()

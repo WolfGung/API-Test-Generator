@@ -16,14 +16,18 @@ COMPONENTS = "#/components/"
 
 
 def load_document(path: Path) -> dict[str, Any]:
-    """JSON by extension, YAML otherwise; a mapping at the top or a SpecError."""
-    text = path.read_text(encoding="utf-8")
+    """JSON by extension, YAML otherwise; a mapping at the top or a SpecError. The message names the cause; the
+    command line puts the file in front of it."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise SpecError("not UTF-8 text") from exc
     try:
         data = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
     except (json.JSONDecodeError, yaml.YAMLError) as exc:
-        raise SpecError(f"{path}: cannot parse: {exc}") from exc
+        raise SpecError(f"cannot parse: {exc}") from exc
     if not isinstance(data, dict):
-        raise SpecError(f"{path}: the document is not a mapping")
+        raise SpecError("the document is not a mapping")
     return data
 
 
@@ -43,7 +47,7 @@ def load_openapi(path: Path) -> ApiModel:
     doc = load_document(path)
     version = str(doc.get("openapi", ""))
     if not version.startswith("3."):
-        raise SpecError(f"{path}: expected an OpenAPI 3.x document, found openapi={version!r}")
+        raise SpecError(f"expected an OpenAPI 3.x document, found openapi={version!r}")
     components = doc.get("components") or {}
     schemas: dict[str, dict[str, Any]] = dict(components.get("schemas") or {})
     info = doc.get("info") or {}
