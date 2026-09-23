@@ -301,3 +301,45 @@ def test_allof_of_non_object_parts_is_an_alias_of_its_first_typed_part(tmp_path)
     assert TypeAdapter(models.PetStatus).validate_python("on") == "on"
     assert TypeAdapter(models.PetNames).validate_python(["a"]) == ["a"]
     assert models.Item.model_validate({"code": "ab"}).code == "ab"
+
+
+def test_allof_of_refs_to_allof_composed_classes_keeps_every_fields_own_type(tmp_path):
+    """Fix round 2 regression: an allOf part that is a $ref to a schema that is itself a class only through its
+    own allOf (Pet, composed from Animal plus an inline object) must still count as an object part one level up
+    (TaggedPet, composed from Pet and Tagged) - losing that made TaggedPet an alias of Pet alone, silently
+    dropping Tagged's fields and their types. A schema whose own `required` sits beside a single-$ref allOf
+    (StrictPet) must become a class the same way, not stay an alias that ignores the extra requirement."""
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={
+            "Animal": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
+            "Named": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": "string"}}},
+            "Pet": {"allOf": [
+                {"$ref": "#/components/schemas/Animal"},
+                {"type": "object", "properties": {"owner": {"type": "string"}}},
+            ]},
+            "Tagged": {"allOf": [
+                {"$ref": "#/components/schemas/Named"},
+                {"type": "object", "properties": {"color": {"type": "string"}}},
+            ]},
+            "TaggedPet": {"allOf": [{"$ref": "#/components/schemas/Pet"}, {"$ref": "#/components/schemas/Tagged"}]},
+            "StrictPet": {"allOf": [{"$ref": "#/components/schemas/Pet"}], "required": ["owner"]},
+        },
+    )
+    source = generate_models(api, "composed.yaml")
+    path = tmp_path / "models.py"
+    path.write_text(source)
+    assert ruff_check(path) == ""
+    assert "class TaggedPet" in source
+    assert "TaggedPet = Pet" not in source
+    assert "class StrictPet" in source
+    assert "StrictPet = Pet" not in source
+    models = load_module(path)
+    complete = models.TaggedPet.model_validate({"name": "n", "owner": "o", "tag": "t", "color": "c"})
+    assert (complete.name, complete.owner, complete.tag, complete.color) == ("n", "o", "t", "c")
+    with pytest.raises(ValidationError):
+        # tag must be a string and color must be a string - both come from Tagged, which a bare `= Pet` alias
+        # would know nothing about
+        models.TaggedPet.model_validate({"name": "n", "tag": 5, "color": ["x"]})
+    with pytest.raises(ValidationError):
+        models.StrictPet.model_validate({"name": "n"})  # StrictPet's own `required: [owner]` must still apply

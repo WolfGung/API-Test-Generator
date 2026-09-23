@@ -167,17 +167,28 @@ class _Writer:
 
     def is_class(self, name: str) -> bool:
         """A class is written for a schema with properties, or an allOf with an object part (after resolving
-        $refs, has properties or type: object); anything else is an alias."""
+        $refs, has properties or type: object, or is itself composed from one by the same rule); anything else
+        is an alias."""
         schema = self.schemas[name]
         if "properties" in schema:
             return True
-        return "allOf" in schema and any(self._is_object_part(part) for part in schema["allOf"])
+        return "allOf" in schema and any(self._is_object_part(part, frozenset()) for part in schema["allOf"])
 
-    def _is_object_part(self, part: Any) -> bool:
+    def _is_object_part(self, part: Any, visited: frozenset[str]) -> bool:
+        """Whether an allOf part is - or, through $ref and its own nested allOf, resolves to - an object
+        schema. `visited` holds the $ref names already unwound on this path, so a $ref cycle ends here rather
+        than recursing forever (a Pet <-> Tagged style mutual allOf, not just a straight self-reference)."""
         if not isinstance(part, dict):
             return False
+        if "$ref" in part:
+            name = ref_name(part["$ref"])
+            if name in visited:
+                return False
+            visited = visited | {name}
         resolved = self.resolve(part)
-        return "properties" in resolved or resolved.get("type") == "object"
+        if "properties" in resolved or resolved.get("type") == "object":
+            return True
+        return "allOf" in resolved and any(self._is_object_part(p, visited) for p in resolved["allOf"])
 
     def type_of(self, schema: Any) -> str:
         if not isinstance(schema, dict) or not schema:
