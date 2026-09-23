@@ -27,6 +27,15 @@ def test_generates_and_reports(tmp_path):
     assert (out / "conftest.py").exists()
 
 
+def test_a_document_without_operations_is_reported_without_a_module_list(tmp_path):
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("openapi: 3.0.3\ninfo: {title: Empty, version: '1'}\npaths: {}\n")
+    out = tmp_path / "suite"
+    result = runner.invoke(app, ["--spec", str(empty), "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [f"Wrote 0 tests for 0 operations to {out}"]
+
+
 def test_exactly_one_input_is_required(tmp_path):
     spec = write(tmp_path)
     neither = runner.invoke(app, ["--out", str(tmp_path / "x")])
@@ -45,6 +54,23 @@ def test_document_errors_and_full_directories_exit_with_one(tmp_path):
     (out / "keep.txt").write_text("")
     result = runner.invoke(app, ["--spec", str(write(tmp_path)), "--out", str(out)])
     assert result.exit_code == 1 and "--overwrite" in result.output
+
+
+def test_an_unknown_tag_is_an_error_that_names_the_tags_the_document_has(tmp_path):
+    out = tmp_path / "x"
+    result = runner.invoke(app, ["--spec", str(write(tmp_path)), "--out", str(out), "--include-tag", "nope"])
+    assert result.exit_code == 1, result.output
+    assert "error: unknown tag nope; the document has: things, default, files" in result.output
+    assert not out.exists()
+
+
+def test_out_at_a_file_is_a_usage_error_without_a_traceback(tmp_path):
+    target = tmp_path / "suite.txt"
+    target.write_text("")
+    result = runner.invoke(app, ["--spec", str(write(tmp_path)), "--out", str(target)])
+    assert result.exit_code == 2 and "is a file" in result.output and "Traceback" not in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert target.read_text() == ""
 
 
 def test_version():

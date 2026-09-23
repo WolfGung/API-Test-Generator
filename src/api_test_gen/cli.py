@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from . import __version__
-from .generator import OutputExists, generate
+from .generator import OutputExists, UnknownTag, generate
 from .ir import SpecError
 from .naming import plural
 from .openapi import load_openapi
@@ -31,7 +31,9 @@ def run(
         Path | None,
         typer.Option("--postman", exists=True, dir_okay=False, help="A Postman collection, schema v2.0 or v2.1."),
     ] = None,
-    out: Annotated[Path | None, typer.Option("--out", help="The directory to write the suite into.")] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", file_okay=False, help="The directory to write the suite into.")
+    ] = None,
     base_url: Annotated[
         str | None,
         typer.Option("--base-url", help="The server the suite defaults to; API_BASE_URL still wins at run time."),
@@ -63,11 +65,12 @@ def run(
             api, out, source_name=source.name, base_url=base_url, overwrite=overwrite,
             include_tags=include_tag or (), exclude_tags=exclude_tag or (),
         )
-    except (SpecError, OutputExists) as exc:
+    except (SpecError, OutputExists, UnknownTag) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     tests, operations = plural(summary.tests, "test"), plural(summary.operations, "operation")
-    typer.echo(f"Wrote {tests} for {operations} to {out}: {', '.join(summary.modules)}")
+    written = f"Wrote {tests} for {operations} to {out}"
+    typer.echo(f"{written}: {', '.join(summary.modules)}" if summary.modules else written)
     for line in summary.skipped:
         typer.echo(f"skipped: {line}")
 

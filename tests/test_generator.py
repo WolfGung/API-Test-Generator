@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from api_test_gen.generator import OutputExists, generate
+from api_test_gen.generator import OutputExists, UnknownTag, generate
 from api_test_gen.openapi import load_openapi
 from api_test_gen.postman import load_postman
 from tests.documents import BOOKISH, NO_SCHEMAS
@@ -41,6 +41,12 @@ def test_generates_a_module_per_tag_and_counts_what_it_wrote(bookish, tmp_path):
     things = (out / "test_things.py").read_text()
     assert "from models import Thing, ThingList\n" in things
     assert '        params={"q": "string", "page-size": 5},\n' in things
+    readme = " ".join((out / "README.md").read_text().split())  # the README wraps its paragraphs
+    assert "Needs Python 3.12 or newer: `models.py` may use `type` statements for recursive aliases." in readme
+    assert (
+        "With `--overwrite` every `test_*.py` in the directory is replaced, including files you added; "
+        "keep your own tests under another name."
+    ) in readme
 
 
 def test_output_is_deterministic(bookish, tmp_path):
@@ -61,6 +67,23 @@ def test_tags_can_be_included_or_excluded_and_base_url_overridden(bookish, tmp_p
     assert summary.modules == ("test_default.py",) and summary.tests == 2
 
 
+def test_unknown_tags_are_refused_naming_the_tags_the_document_has(bookish, tmp_path):
+    out = tmp_path / "out"
+    with pytest.raises(UnknownTag, match="^unknown tag nope; the document has: things, default, files$"):
+        generate(bookish, out, source_name="bookish.yaml", include_tags=["nope"])
+    with pytest.raises(UnknownTag, match="^unknown tags nope, nah; the document has: things, default, files$"):
+        generate(bookish, out, source_name="bookish.yaml", include_tags=["things", "nope"], exclude_tags=["nah"])
+    assert not out.exists()
+
+
+def test_an_output_path_that_is_a_file_is_refused(bookish, tmp_path):
+    out = tmp_path / "suite.txt"
+    out.write_text("mine")
+    with pytest.raises(OutputExists, match="exists and is not a directory"):
+        generate(bookish, out, source_name="bookish.yaml")
+    assert out.read_text() == "mine"
+
+
 def test_a_full_directory_is_refused_unless_overwrite_replaces_the_generated_files(bookish, tmp_path):
     out = tmp_path / "out"
     generate(bookish, out, source_name="bookish.yaml")
@@ -74,6 +97,21 @@ def test_a_full_directory_is_refused_unless_overwrite_replaces_the_generated_fil
     ]
 
 
+def test_a_rendering_failure_leaves_an_overwritten_directory_as_it_was(bookish, tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    generate(bookish, out, source_name="bookish.yaml")
+    (out / "test_mine.py").write_text("mine")
+    before = {path.name: path.read_text() for path in out.iterdir()}
+
+    def broken(**_):
+        raise RuntimeError("rendering broke")
+
+    monkeypatch.setattr("api_test_gen.generator.render_module", broken)
+    with pytest.raises(RuntimeError, match="rendering broke"):
+        generate(bookish, out, source_name="bookish.yaml", overwrite=True)
+    assert {path.name: path.read_text() for path in out.iterdir()} == before
+
+
 def test_no_schemas_means_no_models_module(tmp_path):
     path = tmp_path / "bare.yaml"
     path.write_text(NO_SCHEMAS)
@@ -82,6 +120,8 @@ def test_no_schemas_means_no_models_module(tmp_path):
     assert summary.tests == 1 and not (out / "models.py").exists()
     assert "    assert response.status_code == 204, response.text[:300]\n" in (out / "test_default.py").read_text()
     assert ruff_check(out) == ""
+    readme = " ".join((out / "README.md").read_text().split())
+    assert "Needs Python 3.12 or newer." in readme and "models.py" not in readme
 
 
 @pytest.mark.parametrize(

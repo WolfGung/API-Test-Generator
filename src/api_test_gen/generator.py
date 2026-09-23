@@ -22,7 +22,16 @@ ENV_HINTS = {
 
 
 class OutputExists(RuntimeError):
-    """The output directory already has files in it and overwriting was not asked for."""
+    """The output path is a file, or a directory with files in it while overwriting was not asked for."""
+
+
+class UnknownTag(ValueError):
+    """An include or exclude tag that no operation of the document carries."""
+
+    def __init__(self, unknown: list[str], known: tuple[str, ...]) -> None:
+        noun = "tag" if len(unknown) == 1 else "tags"
+        has = f"the document has: {', '.join(known)}" if known else "the document has no tags"
+        super().__init__(f"unknown {noun} {', '.join(unknown)}; {has}")
 
 
 @dataclass(frozen=True)
@@ -43,15 +52,14 @@ def generate(
     include_tags: Iterable[str] = (),
     exclude_tags: Iterable[str] = (),
 ) -> Summary:
-    if out.exists() and any(out.iterdir()):
-        if not overwrite:
-            raise OutputExists(f"{out} is not empty; pass --overwrite to replace the generated files in it")
-        for stale in out.iterdir():
-            if stale.is_file() and (
-                stale.name in FIXED_FILES or (stale.name.startswith("test_") and stale.suffix == ".py")
-            ):
-                stale.unlink()
-    include, exclude = set(include_tags), set(exclude_tags)
+    include, exclude = list(include_tags), list(exclude_tags)
+    unknown = [tag for tag in dict.fromkeys([*include, *exclude]) if tag not in api.tags]
+    if unknown:
+        raise UnknownTag(unknown, api.tags)
+    if out.exists() and not out.is_dir():
+        raise OutputExists(f"{out} exists and is not a directory")
+    if out.is_dir() and any(out.iterdir()) and not overwrite:
+        raise OutputExists(f"{out} is not empty; pass --overwrite to replace the generated files in it")
     operations = [op for op in api.operations if (not include or op.tag in include) and op.tag not in exclude]
     tags: list[str] = []
     for operation in operations:
@@ -96,6 +104,13 @@ def generate(
         modules=modules,
         out_hint=out.name or ".",
     )
+    # Only now, with every file rendered, is the directory touched: a failure above leaves it as it was.
+    if overwrite and out.is_dir():
+        for stale in out.iterdir():
+            if stale.is_file() and (
+                stale.name in FIXED_FILES or (stale.name.startswith("test_") and stale.suffix == ".py")
+            ):
+                stale.unlink()
     out.mkdir(parents=True, exist_ok=True)
     for name, content in files.items():
         (out / name).write_text(content, encoding="utf-8")
