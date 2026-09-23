@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "api-test-gen"
 version = "0.1.0"
 description = "Turns an OpenAPI 3 document or a Postman collection into a runnable pytest suite"
+authors = [{ name = "Pavel Zhukov Atum" }]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
