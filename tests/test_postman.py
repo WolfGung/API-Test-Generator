@@ -466,3 +466,64 @@ def test_a_request_on_another_host_is_folded_onto_the_first_origin_with_a_note(t
         "pong: sent to https://api.example.com, not to https://other.example.com:8443: "
         "a suite has one base URL, the first the collection names",
     )
+
+
+@pytest.mark.parametrize(
+    "url, path, query, notes",
+    [
+        (
+            "https://{{host}}/things", "/things", [],
+            ("op: 'https://{{host}}' is not the origin; {{host}} is not a collection variable, "
+             "so API_BASE_URL supplies the origin",),
+        ),
+        (
+            "api.{{env}}.example.com/things?x=1", "/things", [("x", "1")],
+            ("op: 'http://api.{{env}}.example.com' is not the origin; {{env}} is not a collection variable, "
+             "so API_BASE_URL supplies the origin",),
+        ),
+        (
+            "https://{{host}}:{{port}}/things/:id", "/things/{id}", [],
+            ("op: 'https://{{host}}:{{port}}' is not the origin; {{host}} is not a collection variable, "
+             "so API_BASE_URL supplies the origin",),
+        ),
+    ],
+)
+def test_a_host_still_holding_an_unresolved_variable_after_the_scheme_is_not_the_origin(
+    tmp_path, url, path, query, notes
+):
+    """`https://{{host}}/things` used to give the suite `https://{{host}}` as its base URL, silently. The leading-
+    variable rule applies to a variable anywhere in the host: the origin is left for API_BASE_URL to supply, and
+    a note names the request and the variable."""
+    api = _load_url(tmp_path, url)
+    assert api.base_url == ""
+    assert api.operations[0].path == path
+    assert query_of(api) == query
+    assert api.notes == notes
+
+
+def test_a_query_key_holding_an_unresolved_variable_is_dropped_with_a_note(tmp_path):
+    """The value rule, for the key: a pair keyed `{{k}}` is not sent under that literal name, whether it comes from
+    `url.query` or from the raw URL alone; a key that is a collection variable is sent under its resolved name."""
+    key_note = "get_thing: query parameter '{{k}}' is not sent; {{k}} is not a collection variable"
+    structured = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {
+            "method": "GET",
+            "url": {
+                "raw": "https://api.example.com/things?{{k}}=1&x=1&{{known}}=2",
+                "query": [
+                    {"key": "{{k}}", "value": "1"},
+                    {"key": "x", "value": "1"},
+                    {"key": "{{known}}", "value": "2"},
+                ],
+            },
+        },
+    }], name="structured")
+    assert query_of(structured) == [("x", "1"), ("resolved", "2")]
+    assert structured.notes == (key_note,)
+    raw = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {"method": "GET", "url": "https://api.example.com/things?{{k}}=1&x=1&{{known}}=2"},
+    }], name="raw")
+    assert query_of(raw) == [("x", "1"), ("resolved", "2")]
+    assert raw.notes == (key_note,)

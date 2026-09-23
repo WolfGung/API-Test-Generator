@@ -153,8 +153,9 @@ def _substitute(text: str, variables: dict[str, str]) -> str:
 
 @dataclass(frozen=True)
 class _Url:
-    """A request's URL taken apart. `notes` says what was not kept - a host label folded into the origin, a
-    query value the collection cannot resolve - as sentences the caller prefixes with the operation's id."""
+    """A request's URL taken apart. `notes` says what was not kept - a host label folded into the origin, a host
+    or a query key or value the collection cannot resolve - as sentences the caller prefixes with the
+    operation's id."""
 
     origin: str  # "" when the collection leaves it to the suite's base URL
     path: str  # with {params}
@@ -178,7 +179,7 @@ def _url(raw: Any, variables: dict[str, str]) -> _Url | None:
             # string keeps a switched-off entry, and where the two disagree the entries are what Postman sends.
             # A null value is blank.
             structured = [
-                (str(q["key"]), _substitute(str(q.get("value") or ""), variables))
+                (_substitute(str(q["key"]), variables), _substitute(str(q.get("value") or ""), variables))
                 for q in entries
                 if not q.get("disabled")
             ]
@@ -220,20 +221,30 @@ def _url(raw: Any, variables: dict[str, str]) -> _Url | None:
         text = f"http://{text}"
     parts = urlsplit(text)
     origin = "" if no_origin else (f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else "")
+    unresolved_host = _VARIABLE.search(parts.netloc)
+    if origin and unresolved_host:
+        # The leading-variable rule, for a variable anywhere in the host (`https://{{host}}/things`): an origin
+        # the collection cannot resolve is not one the suite can send to, so it too is left for API_BASE_URL.
+        notes.append(
+            f"{origin!r} is not the origin; {unresolved_host.group(0)} is not a collection variable, "
+            "so API_BASE_URL supplies the origin"
+        )
+        origin = ""
     # An unknown {{name}} in the path becomes {name}: there it is a genuine parameter.
     path = _VARIABLE.sub(lambda m: "{" + m.group(1).strip() + "}", parts.path or "/")
     if not path.startswith("/"):
         path = "/" + path
     pairs = structured if structured is not None else parse_qsl(parts.query, keep_blank_values=True)
-    query = tuple(pair for pair in pairs if _query_value_resolves(pair, notes))
+    query = tuple(pair for pair in pairs if _query_pair_resolves(pair, notes))
     return _Url(origin=origin, path=path, query=query, path_examples=path_examples, notes=tuple(notes))
 
 
-def _query_value_resolves(pair: tuple[str, str], notes: list[str]) -> bool:
-    """The header rule, for a query pair: a value still holding a {{name}} the collection cannot resolve is not
-    sent at all - `{{trace}}` is never a query value - and a note says so."""
+def _query_pair_resolves(pair: tuple[str, str], notes: list[str]) -> bool:
+    """The header rule, for a query pair: a key or a value still holding a {{name}} the collection cannot
+    resolve is not sent at all - `{{trace}}` is never a query value, nor `{{k}}` a query key - and a note
+    says so."""
     key, value = pair
-    unresolved = _VARIABLE.search(value)
+    unresolved = _VARIABLE.search(key) or _VARIABLE.search(value)
     if unresolved is None:
         return True
     notes.append(f"query parameter {key!r} is not sent; {unresolved.group(0)} is not a collection variable")
