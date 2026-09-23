@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from fastapi import FastAPI
 
 from api_test_gen.openapi import load_openapi
 from api_test_gen.postman import load_postman
@@ -94,10 +95,30 @@ def test_every_item_carries_the_response_the_app_gave_it(collection):
     assert [r["code"] for r in responses] == [200, 200, 200, 200, 201, 200, 200, 200, 204, 201]
     assert [r["status"] for r in responses[3:5]] == ["OK", "Created"]
     assert all(r["header"] == [{"key": "Content-Type", "value": "application/json"}] for r in responses)
-    assert json.loads(responses[0]["body"]) == {"status": "ok", "books": 5}  # recorded against a fresh shelf
+    assert json.loads(responses[0]["body"]) == {"status": "ok", "books": 5}  # recorded against the seeded shelf
     assert json.loads(responses[4]["body"])["id"] == 6  # the book the recording itself added
+    assert [book["id"] for book in json.loads(responses[5]["body"])] == [1]  # the search: seeded shelf again
     assert responses[8]["body"] == ""  # a 204 has none
     assert json.loads(responses[9]["body"]) == {"id": 1, "book_id": 1, "reader": "reader-42"}
+
+
+def test_the_export_refuses_a_token_that_is_not_the_sample_one(monkeypatch):
+    monkeypatch.setattr(postman, "TOKEN", "an-operator-secret")
+    with pytest.raises(RuntimeError, match="SAMPLE_API_TOKEN"):
+        postman.build_collection()
+
+
+def test_an_operation_the_collection_cannot_express_is_refused_by_name(monkeypatch):
+    tiny = FastAPI()
+
+    @tiny.get("/things/{thing_id}", tags=["things"], summary="One thing")
+    def one_thing(thing_id: int) -> dict[str, int]:
+        return {"id": thing_id}
+
+    monkeypatch.setattr(postman, "app", tiny)
+    with pytest.raises(ValueError) as refused:
+        postman.build_collection()
+    assert str(refused.value) == "GET /things/{thing_id}: parameter 'thing_id' has no example"
 
 
 def test_the_loader_reads_it_into_the_same_operations_with_bearer_security():

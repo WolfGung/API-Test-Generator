@@ -25,6 +25,7 @@ def serving(app: FastAPI) -> Iterator[str]:
     while not server.started:
         if not thread.is_alive() or time.monotonic() > deadline:
             server.should_exit = True
+            thread.join(timeout=STOP_TIMEOUT)
             raise RuntimeError("the sample API did not start")
         time.sleep(0.01)
     port = server.servers[0].sockets[0].getsockname()[1]
