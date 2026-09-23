@@ -12,6 +12,14 @@ class SpecError(ValueError):
     """The document cannot be read as the format it was handed over as."""
 
 
+def is_json_media(content_type: str | None) -> bool:
+    """True for `application/json` or a `+json` suffix; a media-type parameter, case or space do not count."""
+    if not content_type:
+        return False
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    return media_type == "application/json" or media_type.endswith("+json")
+
+
 @dataclass(frozen=True)
 class Parameter:
     name: str
@@ -30,7 +38,7 @@ class Body:
 
     @property
     def is_json(self) -> bool:
-        return self.content_type == "application/json" or self.content_type.endswith("+json")
+        return is_json_media(self.content_type)
 
 
 @dataclass(frozen=True)
@@ -42,9 +50,7 @@ class Response:
 
     @property
     def is_json(self) -> bool:
-        return bool(self.content_type) and (
-            self.content_type == "application/json" or self.content_type.endswith("+json")
-        )
+        return is_json_media(self.content_type)
 
 
 @dataclass(frozen=True)

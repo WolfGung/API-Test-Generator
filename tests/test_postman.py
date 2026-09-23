@@ -105,6 +105,43 @@ def test_unknown_variables_and_blank_query_values(small):
     assert [(p.name, p.examples) for p in ping.parameters_in("query")] == [("x", ("",)), ("y", ("1",))]
 
 
+def _load_url(tmp_path, url):
+    path = tmp_path / "urls.postman_collection.json"
+    path.write_text(json.dumps({
+        "info": {"name": "Urls", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+        "item": [{"name": "op", "request": {"method": "GET", "url": url}}],
+    }))
+    return load_postman(path)
+
+
+def test_object_url_without_raw_uses_protocol_host_and_path(tmp_path):
+    api = _load_url(tmp_path, {"protocol": "https", "host": ["api", "example", "com"], "path": ["things"]})
+    assert api.base_url == "https://api.example.com"
+    assert api.operations[0].path == "/things"
+
+
+def test_object_url_without_raw_or_protocol_defaults_to_http(tmp_path):
+    api = _load_url(tmp_path, {"host": ["api", "example", "com"], "path": ["things"]})
+    assert api.base_url == "http://api.example.com"
+    assert api.operations[0].path == "/things"
+
+
+def test_scheme_less_string_url_defaults_to_http(tmp_path):
+    api = _load_url(tmp_path, "postman-echo.com/get?x=1")
+    op = api.operations[0]
+    assert api.base_url == "http://postman-echo.com"
+    assert op.path == "/get"
+    assert [(p.name, p.examples) for p in op.parameters_in("query")] == [("x", ("1",))]
+
+
+def test_unresolved_leading_variable_leaves_the_origin_for_the_suite_to_supply(tmp_path):
+    api = _load_url(tmp_path, "{{baseUrl}}/things/:id")
+    op = api.operations[0]
+    assert api.base_url == ""
+    assert op.path == "/things/{id}"
+    assert op.parameters_in("path")[0].examples == ()
+
+
 def test_auth_is_inherited_overridden_and_unsupported_kinds_do_not_secure(small):
     assert small.security.kind == "bearer"  # the first supported auth met, walking depth first: the Things folder
     assert [op.secured for op in small.operations] == [True, True, False, False, True]
@@ -189,6 +226,7 @@ def test_postman_echo_facts():
     assert by_id["basic_auth"].secured is True
     assert by_id["digest_auth_success"].secured is False  # digest is not a scheme the suite can send
     assert by_id["basic_auth"].success_status == 200
+    assert by_id["basic_auth"].success.is_json is True
     assert api.schemas["BasicAuthResponse"] == {
         "type": "object", "properties": {"authenticated": {"type": "boolean"}}, "required": ["authenticated"],
     }

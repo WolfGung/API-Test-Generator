@@ -147,11 +147,22 @@ def _url(raw: Any, variables: dict[str, str]) -> tuple[str, str, list[tuple[str,
     text = _substitute(text.strip(), variables)
     if not text:
         return None
-    # Unknown {{name}} becomes {name}: in the path that is a parameter, in the host it stays visible.
+    no_origin = False
+    leading_variable = _VARIABLE.match(text)
+    if leading_variable:
+        # An unresolved {{variable}} in host position (Postman's own {{baseUrl}}-style convention, usually
+        # supplied by an environment file this collection does not carry) is not a path parameter: drop it
+        # and leave the origin empty for the generated suite's own base URL to supply.
+        text = text[leading_variable.end() :]
+        no_origin = True
+    # Unknown {{name}} elsewhere becomes {name}: in the path that is a genuine parameter.
     text = _VARIABLE.sub(lambda m: "{" + m.group(1).strip() + "}", text)
     text = _COLON_SEGMENT.sub(lambda m: "{" + m.group(1) + "}", text)
+    if not no_origin and "://" not in text and not text.startswith("/"):
+        # No scheme still means something over the wire: Postman itself sends this request as http.
+        text = f"http://{text}"
     parts = urlsplit(text)
-    origin = f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else ""
+    origin = "" if no_origin else (f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else "")
     path = parts.path or "/"
     if not path.startswith("/"):
         path = "/" + path

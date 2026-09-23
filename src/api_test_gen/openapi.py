@@ -8,11 +8,10 @@ from typing import Any
 
 import yaml
 
-from .ir import NO_SECURITY, ApiModel, Body, Operation, Parameter, Response, Security, SpecError, ref_to
+from .ir import NO_SECURITY, ApiModel, Body, Operation, Parameter, Response, Security, SpecError, is_json_media, ref_to
 from .naming import to_class_name, to_identifier, unique
 
 METHODS = ("get", "put", "post", "delete", "patch", "head", "options")
-JSON_TYPES = ("application/json",)
 COMPONENTS = "#/components/"
 
 
@@ -29,7 +28,7 @@ def load_document(path: Path) -> dict[str, Any]:
 
 
 def is_json(content_type: str) -> bool:
-    return content_type in JSON_TYPES or content_type.endswith("+json")
+    return is_json_media(content_type)
 
 
 def register_schema(schemas: dict[str, dict[str, Any]], name: str, schema: dict[str, Any]) -> dict[str, Any]:
