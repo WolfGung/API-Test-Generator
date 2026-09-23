@@ -117,8 +117,12 @@ def _hoist_inline_objects(schemas: dict[str, dict[str, Any]]) -> None:
 
 def _is_merged(part: Any) -> bool:
     """Whether an `allOf` part of a named schema is an inline object whose properties `_Writer._flatten` merges
-    into the class (a `$ref` part is merged too, but points at a class of its own and is never hoisted)."""
-    return isinstance(part, dict) and "$ref" not in part and "properties" in part
+    into the class: it carries properties itself, or is an object only through its own `allOf` - a part shaped
+    `{type: object, allOf: [{properties: …}]}`, whose nested part `_flatten` folds in the same way. (A `$ref`
+    part is merged too, but points at a class of its own and is never hoisted.)"""
+    if not isinstance(part, dict) or "$ref" in part:
+        return False
+    return "properties" in part or any(_is_merged(nested) for nested in part.get("allOf") or [])
 
 
 def _hoist_merged_part(part: dict[str, Any], base: str, schemas: dict[str, dict[str, Any]], queue: list) -> None:

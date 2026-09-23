@@ -510,3 +510,45 @@ def test_an_inline_allof_part_merged_into_a_class_is_not_also_hoisted(tmp_path):
     assert isinstance(combined.owner, models.CombinedOwner)
     with pytest.raises(ValidationError):
         models.Combined.model_validate({"id": 1})  # extra and owner are required, from the merged part
+
+
+def test_an_inline_allof_part_that_is_an_object_only_through_its_own_allof_is_not_hoisted_either(tmp_path):
+    """A part shaped `{type: object, allOf: [{properties: …}]}` is merged into its class just like one that
+    carries the properties itself - `_flatten` folds the nested part in - so hoisting it left an
+    `…Option2Option1` class nothing references. Only the class and the classes for the objects nested in its
+    properties are written, under the class's own name, however deep the nesting goes."""
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={
+            "Tag": {"type": "object", "properties": {"id": {"type": "integer"}}},
+            "Combined": {"allOf": [
+                {"$ref": "#/components/schemas/Tag"},
+                {"type": "object", "allOf": [{
+                    "required": ["extra", "owner"],
+                    "properties": {
+                        "extra": {"type": "boolean"},
+                        "owner": {"type": "object", "properties": {"name": {"type": "string"}}},
+                    },
+                }]},
+            ]},
+            "Deep": {"allOf": [{"type": "object", "allOf": [{"type": "object", "allOf": [{
+                "properties": {"owner": {"type": "object", "properties": {"name": {"type": "string"}}}},
+            }]}]}]},
+        },
+    )
+    source = generate_models(api, "combined.yaml")
+    path = tmp_path / "models.py"
+    path.write_text(source)
+    assert ruff_check(path) == ""
+    assert "Option" not in source
+    assert [line for line in source.splitlines() if line.startswith("class ")] == [
+        "class Tag(BaseModel):", "class Combined(BaseModel):", "class Deep(BaseModel):",
+        "class CombinedOwner(BaseModel):", "class DeepOwner(BaseModel):",
+    ]
+    models = load_module(path)
+    combined = models.Combined.model_validate({"id": 1, "extra": True, "owner": {"name": "Ann"}})
+    assert (combined.id, combined.extra, combined.owner.name) == (1, True, "Ann")
+    assert isinstance(combined.owner, models.CombinedOwner)
+    assert isinstance(models.Deep.model_validate({"owner": {"name": "Ann"}}).owner, models.DeepOwner)
+    with pytest.raises(ValidationError):
+        models.Combined.model_validate({"id": 1})  # extra and owner are required, from the nested part
