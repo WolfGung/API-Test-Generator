@@ -472,3 +472,41 @@ def test_a_const_becomes_a_literal(tmp_path):
     assert models.Event.model_validate({"kind": "created", "version": 2}).version == 2
     with pytest.raises(ValidationError):
         models.Event.model_validate({"kind": "deleted"})
+
+
+def test_an_inline_allof_part_merged_into_a_class_is_not_also_hoisted(tmp_path):
+    """An inline object part of a named schema's `allOf` is merged into that class; hoisting it as well left a
+    `…Option2` class nothing references. The class is the only one written, the objects nested inside the part
+    are still hoisted - under the class's own name, since that is where their properties end up - and a part
+    that is a `$ref` is unchanged: the referenced class is merged and nothing is added."""
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={
+            "Tag": {"type": "object", "properties": {"id": {"type": "integer"}}},
+            "Combined": {"allOf": [
+                {"$ref": "#/components/schemas/Tag"},
+                {
+                    "type": "object",
+                    "required": ["extra", "owner"],
+                    "properties": {
+                        "extra": {"type": "boolean"},
+                        "owner": {"type": "object", "properties": {"name": {"type": "string"}}},
+                    },
+                },
+            ]},
+        },
+    )
+    source = generate_models(api, "combined.yaml")
+    path = tmp_path / "models.py"
+    path.write_text(source)
+    assert ruff_check(path) == ""
+    assert "Option" not in source
+    assert [line for line in source.splitlines() if line.startswith("class ")] == [
+        "class Tag(BaseModel):", "class Combined(BaseModel):", "class CombinedOwner(BaseModel):",
+    ]
+    models = load_module(path)
+    combined = models.Combined.model_validate({"id": 1, "extra": True, "owner": {"name": "Ann"}})
+    assert (combined.id, combined.extra, combined.owner.name) == (1, True, "Ann")
+    assert isinstance(combined.owner, models.CombinedOwner)
+    with pytest.raises(ValidationError):
+        models.Combined.model_validate({"id": 1})  # extra and owner are required, from the merged part

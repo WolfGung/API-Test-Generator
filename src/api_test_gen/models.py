@@ -101,13 +101,38 @@ def _hoist_inline_objects(schemas: dict[str, dict[str, Any]]) -> None:
     while queue:
         name, schema = queue.pop(0)
         base = to_class_name(name)
-        for prop_name, prop in list((schema.get("properties") or {}).items()):
-            _hoist(schema["properties"], prop_name, prop, f"{base}{to_class_name(prop_name)}", schemas, queue)
+        _hoist_properties(schema, base, schemas, queue)
         if isinstance(schema.get("items"), dict):
             _hoist(schema, "items", schema["items"], f"{base}Item", schemas, queue)
         for combinator in ("allOf", "anyOf", "oneOf"):
             for index, part in enumerate(schema.get(combinator) or []):
+                if combinator == "allOf" and _is_merged(part):
+                    # The part's properties become the class's own (see `_Writer._flatten`), so hoisting the
+                    # part as well would leave an `…Option` class nothing references; only what is nested
+                    # inside it needs a name, and it takes the class's, where the property ends up.
+                    _hoist_merged_part(part, base, schemas, queue)
+                    continue
                 _hoist(schema[combinator], index, part, f"{base}Option{index + 1}", schemas, queue)
+
+
+def _is_merged(part: Any) -> bool:
+    """Whether an `allOf` part of a named schema is an inline object whose properties `_Writer._flatten` merges
+    into the class (a `$ref` part is merged too, but points at a class of its own and is never hoisted)."""
+    return isinstance(part, dict) and "$ref" not in part and "properties" in part
+
+
+def _hoist_merged_part(part: dict[str, Any], base: str, schemas: dict[str, dict[str, Any]], queue: list) -> None:
+    """Name the inline objects inside an `allOf` part that is merged into the class called `base`: its
+    properties, and those of its own merged `allOf` parts, which `_flatten` folds in the same way."""
+    _hoist_properties(part, base, schemas, queue)
+    for nested in part.get("allOf") or []:
+        if _is_merged(nested):
+            _hoist_merged_part(nested, base, schemas, queue)
+
+
+def _hoist_properties(schema: dict[str, Any], base: str, schemas: dict[str, dict[str, Any]], queue: list) -> None:
+    for prop_name, prop in list((schema.get("properties") or {}).items()):
+        _hoist(schema["properties"], prop_name, prop, f"{base}{to_class_name(prop_name)}", schemas, queue)
 
 
 def _hoist(
