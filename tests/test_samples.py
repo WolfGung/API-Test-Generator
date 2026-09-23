@@ -1,5 +1,5 @@
 from api_test_gen.ir import ApiModel
-from api_test_gen.samples import sample_for
+from api_test_gen.samples import required_fields, sample_for
 
 API = ApiModel(
     title="t", version="1", base_url="", operations=(),
@@ -8,6 +8,7 @@ API = ApiModel(
             "type": "object",
             "properties": {"id": {"type": "integer"}, "name": {"type": "string", "example": "fluffy"}},
         },
+        "Status": {"type": "string", "enum": ["available", "pending", "sold"]},
         "Pet": {
             "type": "object",
             "required": ["name", "photoUrls"],
@@ -77,3 +78,51 @@ def test_null_options_are_skipped_and_all_of_is_merged():
         ]
     }
     assert sample(all_of) == {"name": "fluffy", "extra": True}
+
+
+def test_allof_falls_back_to_a_scalar_when_no_part_is_an_object():
+    # An `allOf` combining a non-object `$ref` with a sibling like `description` never gives the merge loop
+    # a dict to merge; the fallback offers the first part's own sample instead of the empty `{}` it used to.
+    assert sample({"allOf": [{"$ref": "#/components/schemas/Status"}], "description": "irrelevant"}) == "available"
+    assert sample({"allOf": [{"type": "integer", "minimum": 5}]}) == 5
+
+
+def test_a_cyclic_reference_stops_recursion_instead_of_bottoming_out_at_max_depth():
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={
+            "Node": {
+                "type": "object",
+                "required": ["name", "children"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "children": {"type": "array", "items": {"$ref": "#/components/schemas/Node"}},
+                },
+            },
+            "Chain": {
+                "type": "object",
+                "required": ["child"],
+                "properties": {"child": {"$ref": "#/components/schemas/Chain"}},
+            },
+        },
+    )
+    assert sample_for({"$ref": "#/components/schemas/Node"}, api) == {"name": "string", "children": []}
+    # `child` is required and not nullable, yet its only schema is `Chain` itself: there is no finite value
+    # that satisfies it, so the best a sampler can offer for that one field is None.
+    assert sample_for({"$ref": "#/components/schemas/Chain"}, api) == {"child": None}
+
+
+def test_required_fields_flattens_allof_through_refs_in_document_order_without_duplicates():
+    api = ApiModel(
+        title="t", version="1", base_url="", operations=(),
+        schemas={
+            "Named": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
+            "Aged": {"type": "object", "required": ["name", "age"], "properties": {"age": {"type": "integer"}}},
+            "Person": {
+                "allOf": [{"$ref": "#/components/schemas/Named"}, {"$ref": "#/components/schemas/Aged"}],
+            },
+        },
+    )
+    assert required_fields({"$ref": "#/components/schemas/Person"}, api) == ["name", "age"]
+    assert required_fields({"type": "object", "required": ["x"]}, api) == ["x"]
+    assert required_fields({}, api) == []

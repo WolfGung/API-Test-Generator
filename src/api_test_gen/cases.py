@@ -8,7 +8,7 @@ from typing import Any
 
 from .ir import ApiModel, Operation, Parameter, ref_name
 from .naming import to_identifier, unique
-from .samples import sample_for
+from .samples import required_fields, sample_for
 
 SUPPORTED_AUTH = ("bearer", "basic", "apiKey")
 PLACEHOLDER = re.compile(r"\{([^{}/]+)\}")
@@ -44,8 +44,7 @@ def cases_for(operation: Operation, api: ApiModel) -> list[Case]:
         if parameter.required and parameter.location in ("query", "header"):
             cases.append(_without_parameter(operation, positive, parameter, taken))
     if operation.body and operation.body.is_json and isinstance(positive.body, dict):
-        schema = api.resolve(operation.body.schema)
-        for field in schema.get("required") or []:
+        for field in required_fields(operation.body.schema, api):
             if field in positive.body:
                 cases.append(_without_field(operation, positive, field, taken))
     if operation.secured and api.security.kind in SUPPORTED_AUTH:
@@ -101,7 +100,10 @@ def _positive(operation: Operation, api: ApiModel, taken: set[str]) -> Case:
     if success and success.is_json and success.schema and "$ref" in success.schema:
         validate = ref_name(success.schema["$ref"])  # a text or binary success is asserted by status only
     if body_kind == "json" and body is None:
-        body_kind = None  # a required body with no schema and no example: nothing sensible to send
+        if operation.body.required:
+            body = {}  # required, but the schema gives nothing sensible: send an empty object instead
+        else:
+            body_kind = None  # optional, with no schema and no example: no body is sent at all
     return Case(
         name=unique(f"test_{operation.operation_id}", taken),
         kind="positive",

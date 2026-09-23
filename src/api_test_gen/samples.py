@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .ir import ApiModel
+from .ir import ApiModel, ref_name
 
 FORMAT_SAMPLES: dict[str, Any] = {
     "email": "user@example.com",
@@ -24,9 +24,19 @@ FORMAT_SAMPLES: dict[str, Any] = {
 MAX_DEPTH = 8
 
 
-def sample_for(schema: dict[str, Any], api: ApiModel, depth: int = 0) -> Any:
+def sample_for(schema: dict[str, Any], api: ApiModel, depth: int = 0, expanding: frozenset[str] = frozenset()) -> Any:
+    """A request value for `schema`. `expanding` names the `$ref`s already on the way down this call's own
+    recursion; re-entering one of them (a tree, a linked list, a self-referencing thread) stops there instead
+    of recursing until `MAX_DEPTH`, which stays only as a backstop for non-`$ref` recursion.
+    """
     if depth > MAX_DEPTH:
         return None
+    ref = schema.get("$ref")
+    if ref is not None:
+        name = ref_name(ref)
+        if name in expanding:
+            return None  # a cycle through this reference: no finite sample to offer
+        expanding = expanding | {name}
     schema = api.resolve(schema)
     for key in ("example", "default", "const"):
         if key in schema:
@@ -40,16 +50,22 @@ def sample_for(schema: dict[str, Any], api: ApiModel, depth: int = 0) -> Any:
     if schema.get("enum"):
         return schema["enum"][0]
     if "allOf" in schema:
+        values = [sample_for(part, api, depth + 1, expanding) for part in schema["allOf"]]
         merged: dict[str, Any] = {}
-        for part in schema["allOf"]:
-            value = sample_for(part, api, depth + 1)
+        has_dict = False
+        for value in values:
             if isinstance(value, dict):
+                has_dict = True
                 merged.update(value)
-        return merged
+        if has_dict:
+            return merged
+        # No part sampled to an object (e.g. an enum `$ref` plus a sibling `description`): the merge has
+        # nothing to merge, so fall back to whatever scalar the first resolvable part offers.
+        return next((value for value in values if value is not None), None)
     for combinator in ("anyOf", "oneOf"):
         if combinator in schema:
             options = [o for o in schema[combinator] if api.resolve(o).get("type") != "null"] or schema[combinator]
-            return sample_for(options[0], api, depth + 1) if options else None
+            return sample_for(options[0], api, depth + 1, expanding) if options else None
     kind = schema.get("type")
     if isinstance(kind, list):
         kind = next((k for k in kind if k != "null"), None)
@@ -64,11 +80,32 @@ def sample_for(schema: dict[str, Any], api: ApiModel, depth: int = 0) -> Any:
     if kind == "boolean":
         return True
     if kind == "array":
-        item = sample_for(schema["items"], api, depth + 1) if "items" in schema else "string"
+        item = sample_for(schema["items"], api, depth + 1, expanding) if "items" in schema else "string"
+        if item is None:
+            return []  # e.g. a list of a self-referencing type: no finite item, so an empty list stands in
         return [item] * max(1, int(schema.get("minItems") or 0))
     if kind == "object":
-        return _object(schema, api, depth)
+        return _object(schema, api, depth, expanding)
     return None
+
+
+def required_fields(schema: dict[str, Any], api: ApiModel) -> list[str]:
+    """Every field the schema requires: `allOf` parts are resolved through `$ref` and flattened recursively,
+    in document order, without duplicates. This mirrors exactly what `sample_for`'s own `allOf` merge puts
+    into the sample, so the sampler and the negative cases generated from it agree on what "required" means.
+    """
+    schema = api.resolve(schema)
+    fields: list[str] = []
+    if "allOf" in schema:
+        for part in schema["allOf"]:
+            for name in required_fields(part, api):
+                if name not in fields:
+                    fields.append(name)
+        return fields
+    for name in schema.get("required") or []:
+        if name not in fields:
+            fields.append(name)
+    return fields
 
 
 def _string(schema: dict[str, Any]) -> str:
@@ -108,9 +145,9 @@ def _has_example(schema: dict[str, Any]) -> bool:
     return any(key in schema for key in ("example", "examples", "default", "const"))
 
 
-def _object(schema: dict[str, Any], api: ApiModel, depth: int) -> dict[str, Any]:
+def _object(schema: dict[str, Any], api: ApiModel, depth: int, expanding: frozenset[str]) -> dict[str, Any]:
     properties = schema.get("properties") or {}
     required = [name for name in schema.get("required") or [] if name in properties]
     optional = [name for name in properties if name not in required and _has_example(api.resolve(properties[name]))]
     wanted = required + optional
-    return {name: sample_for(properties[name], api, depth + 1) for name in wanted}
+    return {name: sample_for(properties[name], api, depth + 1, expanding) for name in wanted}

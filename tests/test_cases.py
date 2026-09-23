@@ -120,6 +120,37 @@ def test_an_optional_empty_body_is_not_sent():
     assert (positive.body, positive.body_kind) == (None, None)
 
 
+def test_a_required_empty_body_is_sent_as_an_empty_object():
+    op = Operation(
+        operation_id="touch", method="POST", path="/touch", tag="t", summary="",
+        body=Body(content_type="application/json", schema={}, required=True),
+    )
+    [positive] = cases_for(op, API)
+    assert (positive.body, positive.body_kind) == ({}, "json")
+    assert positive.expect == "success"
+
+
+def test_allof_body_gets_one_missing_field_case_per_flattened_required_field():
+    op = Operation(
+        operation_id="thing", method="POST", path="/things", tag="t", summary="",
+        body=Body(
+            content_type="application/json",
+            schema={
+                "allOf": [
+                    {"type": "object", "required": ["a"], "properties": {"a": {"type": "string"}}},
+                    {"type": "object", "required": ["b"], "properties": {"b": {"type": "string"}}},
+                ],
+            },
+            required=True,
+        ),
+    )
+    cases = cases_for(op, API)
+    assert [c.name for c in cases] == ["test_thing", "test_thing_without_a", "test_thing_without_b"]
+    assert cases[0].body == {"a": "string", "b": "string"}
+    assert cases[1].body == {"b": "string"}
+    assert cases[2].body == {"a": "string"}
+
+
 def test_petstore_cases():
     api = load_openapi(FIXTURES / "petstore-openapi3.json")
     by_id = {op.operation_id: op for op in api.operations}
