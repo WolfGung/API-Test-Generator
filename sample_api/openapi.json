@@ -1,0 +1,777 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Bookshelf",
+    "description": "A small library API: authors, books and loans.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Liveness, and how many books are on the shelf",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/authors": {
+      "get": {
+        "tags": [
+          "authors"
+        ],
+        "summary": "All authors",
+        "operationId": "list_authors",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Author"
+                  },
+                  "type": "array",
+                  "title": "Response List Authors"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/authors/{author_id}": {
+      "get": {
+        "tags": [
+          "authors"
+        ],
+        "summary": "One author",
+        "operationId": "get_author",
+        "parameters": [
+          {
+            "name": "author_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "examples": [
+                1
+              ],
+              "title": "Author Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Author"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/books": {
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Books, optionally those of one author",
+        "operationId": "list_books",
+        "parameters": [
+          {
+            "name": "author_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "examples": [
+                1
+              ],
+              "title": "Author Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "examples": [
+                10
+              ],
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Book"
+                  },
+                  "title": "Response List Books"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Add a book",
+        "operationId": "create_book",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Book"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or wrong"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/books/search": {
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Books whose title contains a phrase",
+        "operationId": "search_books",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "examples": [
+                "dispossessed"
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Book"
+                  },
+                  "title": "Response Search Books"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/books/{book_id}": {
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "One book",
+        "operationId": "get_book",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "examples": [
+                1
+              ],
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Book"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Replace a book",
+        "operationId": "replace_book",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "examples": [
+                1
+              ],
+              "title": "Book Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Book"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or wrong"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Remove a book; removing one that is gone is still 204",
+        "operationId": "delete_book",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "examples": [
+                5
+              ],
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "The bearer token is missing or wrong"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/loans": {
+      "post": {
+        "tags": [
+          "loans"
+        ],
+        "summary": "Lend a book to the reader in X-Reader",
+        "operationId": "create_loan",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-reader",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "reader-42"
+              ],
+              "title": "X-Reader"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoanIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Loan"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or wrong"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Author": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "examples": [
+              1
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "examples": [
+              "Ursula K. Le Guin"
+            ]
+          },
+          "born": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Born",
+            "examples": [
+              1929
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "Author"
+      },
+      "Book": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title",
+            "examples": [
+              "The Dispossessed"
+            ]
+          },
+          "author_id": {
+            "type": "integer",
+            "title": "Author Id",
+            "examples": [
+              1
+            ]
+          },
+          "year": {
+            "type": "integer",
+            "maximum": 2100.0,
+            "minimum": 1450.0,
+            "title": "Year",
+            "examples": [
+              1974
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "examples": [
+              [
+                "novel",
+                "utopia"
+              ]
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "examples": [
+              1
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "author_id",
+          "year",
+          "id"
+        ],
+        "title": "Book"
+      },
+      "BookIn": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title",
+            "examples": [
+              "The Dispossessed"
+            ]
+          },
+          "author_id": {
+            "type": "integer",
+            "title": "Author Id",
+            "examples": [
+              1
+            ]
+          },
+          "year": {
+            "type": "integer",
+            "maximum": 2100.0,
+            "minimum": 1450.0,
+            "title": "Year",
+            "examples": [
+              1974
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "examples": [
+              [
+                "novel",
+                "utopia"
+              ]
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "author_id",
+          "year"
+        ],
+        "title": "BookIn"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Health": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "examples": [
+              "ok"
+            ]
+          },
+          "books": {
+            "type": "integer",
+            "title": "Books",
+            "examples": [
+              5
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "books"
+        ],
+        "title": "Health"
+      },
+      "Loan": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "examples": [
+              1
+            ]
+          },
+          "book_id": {
+            "type": "integer",
+            "title": "Book Id",
+            "examples": [
+              1
+            ]
+          },
+          "reader": {
+            "type": "string",
+            "title": "Reader",
+            "examples": [
+              "reader-42"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "book_id",
+          "reader"
+        ],
+        "title": "Loan"
+      },
+      "LoanIn": {
+        "properties": {
+          "book_id": {
+            "type": "integer",
+            "title": "Book Id",
+            "examples": [
+              1
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "book_id"
+        ],
+        "title": "LoanIn"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}
