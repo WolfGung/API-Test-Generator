@@ -1,6 +1,8 @@
 import ast
 import warnings
 
+import pytest
+
 from api_test_gen.cases import Case
 from api_test_gen.ir import ApiModel, Security
 from api_test_gen.render import docstring, literal, render_conftest, render_module
@@ -43,6 +45,25 @@ def test_a_string_too_wide_for_its_line_is_split_and_keeps_its_value():
         "                (\n"
     )
     assert all(len(line) <= 100 for line in rendered.splitlines())
+
+
+def test_every_line_of_an_expanded_value_stays_within_the_width():
+    # What follows a value on its line counts too: the comma after an item, the `: (` after a key.
+    boundary = [
+        (["m" * 113], 10, 120, '    "' + "m" * 113 + '",'),  # exactly 120 columns with the comma: stays flat
+        (["m" * 114], 10, 120, "    (\n"),  # 121 columns flat: split
+        ({"k": "m" * 108}, 10, 120, '    "k": "' + "m" * 108 + '",'),
+        ({"k": "m" * 109}, 10, 120, '    "k": (\n'),
+        ({"k" * 111: 1}, 10, 120, '    "' + "k" * 111 + '": (\n        1\n    ),'),  # the key fills the line
+        ({"k" * 112: 1}, 10, 120, "    (\n"),  # no room left for `: (` behind the key: the key is split
+        ({"outer": [{"inner": "m" * 90}, "n" * 200]}, 5, 100, '            "inner": (\n'),
+    ]
+    for value, prefix, width, expected in boundary:
+        rendered = literal(value, prefix=prefix, width=width)
+        assert ast.literal_eval(rendered) == value, rendered
+        lines = rendered.splitlines()
+        assert prefix + len(lines[0]) <= width and all(len(line) <= width for line in lines[1:]), rendered
+        assert expected in rendered, rendered
 
 
 def case(**overrides):
@@ -135,16 +156,24 @@ def test_a_model_named_by_a_non_success_case_is_not_imported(tmp_path):
     assert ruff_check(path) == ""
 
 
-def test_model_imports_are_ordered_the_way_ruff_sorts_them(tmp_path):
-    names = ["Pets", "PetTag", "URL", "Thing2", "Thing10"]
+@pytest.mark.parametrize(
+    "names, expected",
+    [
+        (["Pets", "PetTag", "URL", "Thing2", "Thing10"], "URL, Pets, PetTag, Thing2, Thing10"),
+        (["Item1", "Item02A"], "Item02A, Item1"),  # a run with a leading zero sorts before one without
+        (["Thing02Item", "Thing010Item"], "Thing010Item, Thing02Item"),  # and digit by digit against another
+        (["Model2a", "Model020"], "Model020, Model2a"),
+    ],
+)
+def test_model_imports_are_ordered_the_way_ruff_sorts_them(names, expected, tmp_path):
     source = render_module(
-        tag="x", marker="x", operations=5, source_name="d.json", model_names={name: name for name in names},
+        tag="x", marker="x", operations=len(names), source_name="d.json", model_names={name: name for name in names},
         cases=[case(name=f"test_{index}", validate=name, uses_auth=False) for index, name in enumerate(names)],
     )
     path = tmp_path / "test_x.py"
     path.write_text(source)
-    assert ruff_check(path) == ""
-    assert "from models import URL, Pets, PetTag, Thing2, Thing10\n" in source
+    assert ruff_check(path) == ""  # ruff's own verdict on the order is the proof; the line below only reads it
+    assert f"from models import {expected}\n" in source
 
 
 def request_arguments(source: str) -> dict[str, dict[str, object]]:

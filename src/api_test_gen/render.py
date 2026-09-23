@@ -27,15 +27,16 @@ def _width(text: str) -> int:
     return sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
 
 
-def literal(value: Any, indent: int = 0, width: int = WIDTH, prefix: int = 0) -> str:
+def literal(value: Any, indent: int = 0, width: int = WIDTH, prefix: int = 0, suffix: int = 0) -> str:
     """A JSON value as Python source: double-quoted strings, expanded one item per line only when it must be.
 
-    `indent` is the indentation of the line the value starts on and `prefix` the width of what that line already
-    holds before the value (a keyword, a key, an assignment); the flat form is used when it fits `width` behind
-    them. A string that does not fit becomes parenthesised implicit concatenation, one chunk per line.
+    `indent` is the indentation of the line the value starts on, `prefix` the width of what that line already
+    holds before the value (a keyword, a key, an assignment) and `suffix` the width of what follows it on the
+    same line (a comma, a bracket); the flat form is used when it fits `width` with them. A string that does not
+    fit becomes parenthesised implicit concatenation, one chunk per line.
     """
     flat = _flat(value)
-    if indent + prefix + _width(flat) <= width:
+    if indent + prefix + _width(flat) + suffix <= width:
         return flat
     if not isinstance(value, dict | list | tuple):
         return _parenthesised(value, indent, width)
@@ -44,11 +45,11 @@ def literal(value: Any, indent: int = 0, width: int = WIDTH, prefix: int = 0) ->
     if isinstance(value, dict):
         items = []
         for key, item in value.items():
-            rendered_key = literal(key, indent + 4, width)
+            rendered_key = literal(key, indent + 4, width, suffix=3)  # `: (` follows a key whose value expands
             after_key = (1 if "\n" in rendered_key else _width(rendered_key)) + 2  # `"key": ` or `): `
-            items.append(f"{pad}{rendered_key}: {literal(item, indent + 4, width, after_key)},")
+            items.append(f"{pad}{rendered_key}: {literal(item, indent + 4, width, after_key, suffix=1)},")
         return "{\n" + "\n".join(items) + f"\n{close}}}"
-    items = [f"{pad}{literal(item, indent + 4, width)}," for item in value]
+    items = [f"{pad}{literal(item, indent + 4, width, suffix=1)}," for item in value]
     return "[\n" + "\n".join(items) + f"\n{close}]"
 
 
@@ -185,7 +186,7 @@ def _path_lines(case: Case) -> tuple[list[str], str]:
 
 def _keyword(name: str, value: Any) -> str:
     """One `name=<value>,` line of the request call, the value fitted behind its keyword."""
-    return f"{INDENT * 2}{name}={literal(value, 8, prefix=len(name) + 1)},"
+    return f"{INDENT * 2}{name}={literal(value, 8, prefix=len(name) + 1, suffix=1)},"
 
 
 def request_block(case: Case) -> str:
@@ -203,7 +204,8 @@ def request_block(case: Case) -> str:
     if case.query:
         lines.append(_keyword("params", case.query))
     if case.uses_auth and headers:
-        merged = literal(headers, 8, prefix=len(MERGED_HEADERS))
+        # The dict's own opening brace becomes the one in `headers={`, so the prefix is one shorter than it reads.
+        merged = literal(headers, 8, prefix=len(MERGED_HEADERS) - 1, suffix=1)
         if merged.startswith("{\n"):  # expanded: auth_headers goes on a line of its own
             lines.append(f"{INDENT * 2}headers={{\n{INDENT * 3}**auth_headers,\n{merged[2:]},")
         else:
@@ -237,17 +239,22 @@ def checks_block(case: Case, model_name: str | None) -> str:
 
 def skip_decorator(reason: str) -> str:
     """The `@pytest.mark.skip(...)` line of a case the generator writes but cannot make run."""
-    return f"{SKIP}{literal(reason, prefix=len(SKIP), width=LINE_LENGTH - len(')'))})"
+    return f"{SKIP}{literal(reason, prefix=len(SKIP), suffix=1, width=LINE_LENGTH)})"
 
 
 def _natural(text: str) -> list[Any]:
-    """`text` split so that runs of digits compare by value, their spelling deciding between equal values."""
-    return [(int(part), part) if part.isdigit() else part for part in re.split(r"(\d+)", text)]
+    """`text` split for ruff's natural order of digit runs: a run with a leading zero compares digit by digit, as
+    a fraction, and sorts before any run without one; the others compare by value (length first, then digits)."""
+    return [
+        ((0, part) if part.startswith("0") else (1, len(part), part)) if part.isdigit() else part
+        for part in re.split(r"(\d+)", text)
+    ]
 
 
 def _isort_key(name: str) -> tuple[int, list[Any], list[Any]]:
     """Where ruff's isort puts a member of a `from` import: constants (all caps, more than one letter) first,
-    then classes, then the rest; within a group case-insensitively, the original spelling deciding ties."""
+    then classes, then the rest; within a group case-insensitively with digit runs in natural order, the
+    original spelling deciding ties."""
     if len(name) > 1 and name.isupper():
         group = 0
     elif name[:1].isupper():

@@ -20,7 +20,7 @@ import httpx
 import pytest
 
 {% set base_url_prefix = 'BASE_URL = os.environ.get("API_BASE_URL", ' %}
-{{ base_url_prefix }}{{ base_url | literal(prefix=base_url_prefix | length, width=LINE_LENGTH - 1) }})
+{{ base_url_prefix }}{{ base_url | literal(prefix=base_url_prefix | length, suffix=1, width=LINE_LENGTH) }})
 TIMEOUT = float(os.environ.get("API_TIMEOUT", "10"))
 {% set markers_prefix = "MARKERS = " %}
 {{ markers_prefix }}{{ markers | literal(prefix=markers_prefix | length, width=LINE_LENGTH) }}
