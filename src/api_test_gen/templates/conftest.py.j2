@@ -1,4 +1,4 @@
-"""Fixtures for the suite generated from {{ source_name }} ({{ title }}{% if version %} {{ version }}{% endif %}).
+"""{{ heading | doctext }}
 
 API_BASE_URL points the suite at a server; the default below is the document's.
 {% if security.kind == "bearer" %}
@@ -6,7 +6,7 @@ API_TOKEN is the bearer token the secured operations send.
 {% elif security.kind == "basic" %}
 API_USERNAME and API_PASSWORD are the credentials the secured operations send.
 {% elif security.kind == "apiKey" %}
-API_KEY is the key the secured operations send in the {{ security.header }} header.
+{{ ("API_KEY is the key the secured operations send in the " ~ security.header ~ " header.") | doctext }}
 {% endif %}
 API_TIMEOUT is the request timeout in seconds (default 10).
 """
@@ -19,9 +19,11 @@ import os
 import httpx
 import pytest
 
-BASE_URL = os.environ.get("API_BASE_URL", {{ base_url | literal }})
+{% set base_url_prefix = 'BASE_URL = os.environ.get("API_BASE_URL", ' %}
+{{ base_url_prefix }}{{ base_url | literal(prefix=base_url_prefix | length, width=LINE_LENGTH - 1) }})
 TIMEOUT = float(os.environ.get("API_TIMEOUT", "10"))
-MARKERS = {{ markers | literal }}
+{% set markers_prefix = "MARKERS = " %}
+{{ markers_prefix }}{{ markers | literal(prefix=markers_prefix | length, width=LINE_LENGTH) }}
 
 
 def pytest_configure(config):
@@ -53,7 +55,7 @@ def auth_headers():
     key = os.environ.get("API_KEY")
     if not key:
         pytest.skip("API_KEY is not set; the secured operations need it")
-    return {{ '{' }}{{ security.header | literal }}: key}
+    return {{ '{' }}{{ security.header | literal(4) }}: key}
 {% else %}
     return {}
 {% endif %}

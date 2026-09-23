@@ -1,5 +1,10 @@
+import ast
+import warnings
+
 from api_test_gen.cases import Case
-from api_test_gen.render import literal, render_module
+from api_test_gen.ir import ApiModel, Security
+from api_test_gen.render import docstring, literal, render_conftest, render_module
+from tests.helpers import ruff_check
 
 
 def test_literal_is_flat_when_it_fits_and_expanded_when_it_does_not():
@@ -14,6 +19,30 @@ def test_literal_is_flat_when_it_fits_and_expanded_when_it_does_not():
         '            "nested": {"k": "' + "v" * 40 + '"},\n'
         "        }"
     )
+
+
+def test_a_string_too_wide_for_its_line_is_split_and_keeps_its_value():
+    text = 'quoted "text", a backslash \\, a tab\t and naïve accents ' * 6  # escapes land on chunk boundaries
+    for indent in (0, 4, 8, 16):
+        rendered = literal(text, indent)
+        assert rendered.startswith("(\n") and rendered.endswith("\n" + " " * indent + ")")
+        assert ast.literal_eval(rendered) == text
+        assert all(len(line) <= 100 for line in rendered.splitlines())
+    # What stands before the value on its line counts towards the width too.
+    assert literal("x" * 90, prefix=20).startswith("(\n") and literal("x" * 90, prefix=5) == '"' + "x" * 90 + '"'
+    nested = {"key": "v" * 120, "list": ["w" * 120, 1], "k" * 120: 2}
+    rendered = literal(nested, indent=8)
+    assert ast.literal_eval(rendered) == nested
+    assert rendered.startswith(
+        "{\n"
+        '            "key": (\n'
+        '                "' + "v" * 82 + '"\n'
+        '                "' + "v" * 38 + '"\n'
+        "            ),\n"
+        '            "list": [\n'
+        "                (\n"
+    )
+    assert all(len(line) <= 100 for line in rendered.splitlines())
 
 
 def case(**overrides):
@@ -93,3 +122,129 @@ def test_no_validation_means_no_model_imports():
     )
     assert "models" not in source and "TypeAdapter" not in source
     assert "    assert 400 <= response.status_code < 500, response.text[:300]\n" in source
+
+
+def test_a_model_named_by_a_non_success_case_is_not_imported(tmp_path):
+    source = render_module(
+        tag="x", marker="x", operations=1, source_name="d.json", model_names={"Thing": "Thing"},
+        cases=[case(kind="missing_field", expect="client_error", expected_status=None, uses_auth=False)],
+    )
+    assert "models" not in source and "TypeAdapter" not in source
+    path = tmp_path / "test_x.py"
+    path.write_text(source)
+    assert ruff_check(path) == ""
+
+
+def test_model_imports_are_ordered_the_way_ruff_sorts_them(tmp_path):
+    names = ["Pets", "PetTag", "URL", "Thing2", "Thing10"]
+    source = render_module(
+        tag="x", marker="x", operations=5, source_name="d.json", model_names={name: name for name in names},
+        cases=[case(name=f"test_{index}", validate=name, uses_auth=False) for index, name in enumerate(names)],
+    )
+    path = tmp_path / "test_x.py"
+    path.write_text(source)
+    assert ruff_check(path) == ""
+    assert "from models import URL, Pets, PetTag, Thing2, Thing10\n" in source
+
+
+def request_arguments(source: str) -> dict[str, dict[str, object]]:
+    """Per test: what its client.request(...) call passes and what its path variables hold, read back from the
+    source as values; an argument that is not a literal (the auth headers) is left out."""
+    found: dict[str, dict[str, object]] = {}
+    for function in ast.parse(source).body:
+        if not isinstance(function, ast.FunctionDef):
+            continue
+        arguments: dict[str, object] = {}
+        for node in ast.walk(function):
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "request":
+                for keyword in node.keywords:
+                    try:
+                        arguments[str(keyword.arg)] = ast.literal_eval(keyword.value)
+                    except ValueError:
+                        pass
+            elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+                arguments[node.targets[0].id] = node.value.value
+        found[function.name] = arguments
+    return found
+
+
+def test_long_values_render_a_lint_clean_module_and_reach_the_request_unchanged(tmp_path):
+    long = "lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt " * 4
+    body = {"note": long, "k" * 150: 1, "items": [long, 2], "wide": "東京都渋谷区" * 20}
+    source = render_module(
+        tag="x", marker="x", operations=4, source_name="d.json", model_names={},
+        cases=[
+            case(name="test_text", method="POST", path="/echo", path_params={}, body=long, body_kind="text",
+                 validate=None, expected_status=None, uses_auth=False),
+            case(name="test_json", method="POST", path_params={"id": "i" * 150}, query={"q": "東京" * 60},
+                 headers={"X-Long": "h" * 150}, body=body, body_kind="json", validate=None, expected_status=None),
+            case(name="test_plain_headers", headers={"X-Long": "h" * 150, "X-Short": "s"}, uses_auth=False,
+                 validate=None, expected_status=None),
+            case(name="test_skipped", skip_reason="r" * 120, validate=None, expected_status=None, uses_auth=False),
+        ],
+    )
+    path = tmp_path / "test_x.py"
+    path.write_text(source, encoding="utf-8")
+    assert ruff_check(path) == ""
+    arguments = request_arguments(source)
+    assert arguments["test_text"]["content"] == long
+    assert arguments["test_json"]["json"] == body
+    assert arguments["test_json"]["params"] == {"q": "東京" * 60}
+    assert arguments["test_json"]["id"] == "i" * 150
+    assert arguments["test_plain_headers"]["headers"] == {"X-Long": "h" * 150, "X-Short": "s"}
+    assert "        headers={\n            **auth_headers,\n" in source
+    skip = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.decorator_list)
+    assert ast.literal_eval(skip.decorator_list[0].keywords[0].value) == "r" * 120
+
+
+def test_docstrings_are_escaped_and_wrapped(tmp_path):
+    for text in ['ends "', 'ends ""', 'ends """', 'a\\"', "ends with \\", '"""', '""""', "", 'mid """ and \\ too']:
+        assert ast.literal_eval(docstring(text)) == text, text
+    docs = {
+        "test_quote": 'GET /x: ends with a "quote"',
+        "test_escapes": 'GET /x: back\\slash, """ inside, and ""',
+        "test_long": "GET /x: " + ("word " * 40).strip(),
+        "test_one_word": "GET /x: " + "w" * 200,
+        "test_long_path": "GET /" + "p" * 130,
+    }
+    source = render_module(
+        tag="a\\d", marker="a_d", operations=5, source_name='s"""n.yaml', model_names={},
+        cases=[
+            case(name=name, doc=doc, validate=None, expected_status=None, uses_auth=False) for name, doc in docs.items()
+        ],
+    )
+    path = tmp_path / "test_a_d.py"
+    path.write_text(source)
+    assert ruff_check(path) == ""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # an invalid escape sequence would be a SyntaxError here
+        module = ast.parse(source)
+    assert ast.get_docstring(module, clean=False) == 'a\\d: 5 operations from s"""n.yaml, generated by api-test-gen.'
+    functions = {node.name: node for node in module.body if isinstance(node, ast.FunctionDef)}
+    for name, doc in docs.items():
+        written = ast.get_docstring(functions[name], clean=False)
+        assert written is not None and "".join(written.split()) == "".join(doc.split()), name
+    assert ast.get_docstring(functions["test_quote"], clean=False) == docs["test_quote"]
+    # The summary goes under the head line, and the closing quotes stand on a line of their own.
+    assert '    """GET /x:\n    word word' in source and ' word\n    """\n' in source
+    assert all(len(line) <= 120 for line in source.splitlines())
+
+
+def test_a_long_title_and_base_url_keep_the_conftest_lint_clean(tmp_path):
+    api = ApiModel(
+        title="T" * 60 + ' """ \\ ' + "東京" * 30, version="9", base_url="", operations=(),
+        security=Security(kind="apiKey", name="k", header="X-" + "K" * 120),
+    )
+    markers = [f"marker_{index}" for index in range(40)]
+    base_url = "https://" + "h" * 150 + "/v1"
+    source = render_conftest(api, source_name="s.yaml", base_url=base_url, markers=markers)
+    path = tmp_path / "conftest.py"
+    path.write_text(source, encoding="utf-8")
+    assert ruff_check(path) == ""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        module = ast.parse(source)
+    assigned = {node.targets[0].id: node.value for node in module.body if isinstance(node, ast.Assign)}
+    assert ast.literal_eval(assigned["BASE_URL"].args[1]) == base_url
+    assert ast.literal_eval(assigned["MARKERS"]) == markers
+    assert ast.get_docstring(module, clean=False).startswith("Fixtures for the suite generated from s.yaml (TTT")

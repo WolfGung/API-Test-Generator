@@ -33,7 +33,7 @@ def test_generates_a_module_per_tag_and_counts_what_it_wrote(bookish, tmp_path):
     # default: ping, echo = 2; files: upload = 1
     assert summary.tests == 11
     assert collected(out) == summary.tests
-    assert ruff_check(out, ignore=("E501",)) == ""
+    assert ruff_check(out) == ""
     conftest = (out / "conftest.py").read_text()
     assert 'BASE_URL = os.environ.get("API_BASE_URL", "https://api.example.com/v1")' in conftest
     assert 'MARKERS = ["things", "default", "files"]' in conftest
@@ -93,4 +93,4 @@ def test_the_public_documents_generate_lint_clean_collectable_suites(loader, nam
     summary = generate(loader(FIXTURES / name), out, source_name=name)
     assert summary.operations == operations
     assert collected(out) == summary.tests
-    assert ruff_check(out, ignore=("E501",)) == ""
+    assert ruff_check(out) == ""
