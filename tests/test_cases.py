@@ -1,0 +1,146 @@
+from pathlib import Path
+
+from api_test_gen.cases import cases_for
+from api_test_gen.ir import ApiModel, Body, Operation, Parameter, Response, Security
+from api_test_gen.openapi import load_openapi
+
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+SCHEMAS = {
+    "Thing": {
+        "type": "object",
+        "required": ["name", "size"],
+        "properties": {
+            "name": {"type": "string", "example": "x"},
+            "size": {"type": "integer"},
+            "note": {"type": "string"},
+        },
+    },
+}
+API = ApiModel(
+    title="t", version="1", base_url="", operations=(), schemas=SCHEMAS, security=Security(kind="bearer", name="b")
+)
+
+CREATE = Operation(
+    operation_id="create_thing", method="POST", path="/owners/{owner}/things", tag="things", summary="Create a thing",
+    parameters=(
+        Parameter(name="owner", location="path", required=True, schema={"type": "integer"}, examples=(7,)),
+        Parameter(name="dry", location="query", required=True, schema={"type": "boolean"}),
+        Parameter(name="verbose", location="query", required=False, schema={"type": "boolean"}, examples=(True,)),
+        Parameter(name="quiet", location="query", required=False, schema={"type": "boolean"}),
+        Parameter(name="X-Trace", location="header", required=True, schema={"type": "string"}, examples=("abc",)),
+    ),
+    body=Body(content_type="application/json", schema={"$ref": "#/components/schemas/Thing"}, required=True),
+    responses=(Response(status="201", schema={"$ref": "#/components/schemas/Thing"}, content_type="application/json"),),
+    secured=True,
+)
+
+
+def test_the_positive_case_carries_every_documented_value():
+    positive = cases_for(CREATE, API)[0]
+    assert positive.name == "test_create_thing"
+    assert positive.kind == "positive"
+    assert (positive.method, positive.path) == ("POST", "/owners/{owner}/things")
+    assert positive.path_params == {"owner": 7}
+    assert positive.query == {"dry": True, "verbose": True}  # optional without an example is left out
+    assert positive.headers == {"X-Trace": "abc"}
+    assert positive.body == {"name": "x", "size": 1}
+    assert positive.body_kind == "json"
+    assert positive.expected_status == 201
+    assert positive.validate == "Thing"
+    assert positive.uses_auth is True
+    assert positive.skip_reason is None
+    assert positive.doc == "POST /owners/{owner}/things: Create a thing"
+
+
+def test_one_negative_per_required_parameter_and_field_plus_no_credentials():
+    cases = cases_for(CREATE, API)
+    assert [c.name for c in cases] == [
+        "test_create_thing",
+        "test_create_thing_without_dry",
+        "test_create_thing_without_x_trace",
+        "test_create_thing_without_name",
+        "test_create_thing_without_size",
+        "test_create_thing_without_credentials",
+    ]
+    without_dry = cases[1]
+    assert without_dry.kind == "missing_parameter"
+    assert without_dry.query == {"verbose": True}
+    assert without_dry.expect == "client_error"
+    assert without_dry.uses_auth is True
+    assert without_dry.validate is None
+    assert cases[2].headers == {}
+    assert cases[3].kind == "missing_field"
+    assert cases[3].body == {"size": 1}
+    assert cases[5].kind == "no_credentials"
+    assert cases[5].uses_auth is False
+    assert cases[5].expect == "unauthorized"
+    assert cases[5].body == {"name": "x", "size": 1}
+
+
+def test_names_stay_unique_when_a_parameter_and_a_field_share_a_name():
+    op = Operation(
+        operation_id="thing", method="POST", path="/things", tag="t", summary="",
+        parameters=(Parameter(name="name", location="query", required=True, schema={"type": "string"}),),
+        body=Body(content_type="application/json", schema={"$ref": "#/components/schemas/Thing"}, required=True),
+    )
+    assert [c.name for c in cases_for(op, API)] == [
+        "test_thing",
+        "test_thing_without_name",
+        "test_thing_without_name_2",
+        "test_thing_without_size",
+    ]
+
+
+def test_a_text_body_is_sent_as_content_and_a_form_body_skips_the_operation():
+    text = Operation(
+        operation_id="echo", method="POST", path="/post", tag="t", summary="",
+        body=Body(content_type="text/plain", schema={"type": "string"}, required=True, examples=("hello",)),
+    )
+    [positive] = cases_for(text, API)
+    fields = (positive.body, positive.body_kind, positive.expected_status, positive.expect)
+    assert fields == ("hello", "text", None, "success")
+    form = Operation(
+        operation_id="upload", method="POST", path="/upload", tag="t", summary="",
+        parameters=(Parameter(name="kind", location="query", required=True, schema={"type": "string"}),),
+        body=Body(content_type="multipart/form-data", schema={"type": "object"}, required=True),
+        secured=True,
+    )
+    [only] = cases_for(form, API)
+    assert only.skip_reason == "request body is multipart/form-data, which the generator does not produce"
+    assert only.body is None
+
+
+def test_an_optional_empty_body_is_not_sent():
+    op = Operation(
+        operation_id="touch", method="POST", path="/touch", tag="t", summary="",
+        body=Body(content_type="application/json", schema={}, required=False),
+    )
+    [positive] = cases_for(op, API)
+    assert (positive.body, positive.body_kind) == (None, None)
+
+
+def test_petstore_cases():
+    api = load_openapi(FIXTURES / "petstore-openapi3.json")
+    by_id = {op.operation_id: op for op in api.operations}
+    find = cases_for(by_id["find_pets_by_status"], api)
+    assert [c.name for c in find] == [
+        "test_find_pets_by_status",
+        "test_find_pets_by_status_without_status",
+        "test_find_pets_by_status_without_credentials",
+    ]
+    assert find[0].query == {"status": "available"}
+    assert find[0].validate == "FindPetsByStatusResponse"
+    add = cases_for(by_id["add_pet"], api)
+    assert [c.name for c in add] == [
+        "test_add_pet",
+        "test_add_pet_without_name",
+        "test_add_pet_without_photo_urls",
+        "test_add_pet_without_credentials",
+    ]
+    assert add[0].body["name"] == "doggie"
+    assert add[0].body["photoUrls"] == ["string"]
+    upload = cases_for(by_id["upload_file"], api)
+    assert len(upload) == 1 and upload[0].skip_reason.startswith("request body is application/octet-stream")
+    total = sum(len(cases_for(op, api)) for op in api.operations)
+    assert total == 33
