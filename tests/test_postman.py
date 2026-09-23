@@ -527,3 +527,27 @@ def test_a_query_key_holding_an_unresolved_variable_is_dropped_with_a_note(tmp_p
     }], name="raw")
     assert query_of(raw) == [("x", "1"), ("resolved", "2")]
     assert raw.notes == (key_note,)
+
+
+def test_a_header_key_holding_an_unresolved_variable_is_dropped_with_a_note(tmp_path):
+    """The value rule, for the key: a header keyed `{{hk}}` is not sent under that literal name, and a note names
+    the request and the variable; a key that is a collection variable is sent under its resolved name."""
+    api = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {
+            "method": "GET",
+            "url": "https://api.example.com/things",
+            "header": [
+                {"key": "{{hk}}", "value": "1"},
+                {"key": "X-{{hk}}-{{other}}", "value": "2"},
+                {"key": "{{known}}", "value": "3"},
+                {"key": "X-Plain", "value": "4"},
+            ],
+        },
+    }])
+    headers = [(p.name, p.examples[0]) for p in api.operations[0].parameters_in("header")]
+    assert headers == [("resolved", "3"), ("X-Plain", "4")]
+    assert api.notes == (
+        "get_thing: header '{{hk}}' is not sent; {{hk}} is not a collection variable",
+        "get_thing: header 'X-{{hk}}-{{other}}' is not sent; {{hk}} is not a collection variable",
+    )

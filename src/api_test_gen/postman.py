@@ -252,8 +252,9 @@ def _query_pair_resolves(pair: tuple[str, str], notes: list[str]) -> bool:
 
 
 def _headers(raw: Any, variables: dict[str, str], notes: list[str], operation_id: str) -> Iterator[Parameter]:
-    """The request's own headers, the ones the client fixture does not set. A value still holding a {{name}} the
-    collection cannot resolve is not sent at all - `{{trace}}` is never a header value - and a note says so."""
+    """The request's own headers, the ones the client fixture does not set. A key or a value still holding a
+    {{name}} the collection cannot resolve is not sent at all - `{{trace}}` is never a header value, nor `{{hk}}`
+    a header name - and a note says so."""
     if isinstance(raw, str):
         entries = [
             {"key": k.strip(), "value": v.strip()}
@@ -263,11 +264,11 @@ def _headers(raw: Any, variables: dict[str, str], notes: list[str], operation_id
     else:
         entries = [h for h in raw or [] if isinstance(h, dict)]
     for entry in entries:
-        key = str(entry.get("key") or "")
+        key = _substitute(str(entry.get("key") or ""), variables)
         if not key or entry.get("disabled") or key.lower() in DROPPED_HEADERS:
             continue
         value = _substitute(str(entry.get("value", "")), variables)
-        unresolved = _VARIABLE.search(value)
+        unresolved = _VARIABLE.search(key) or _VARIABLE.search(value)
         if unresolved:
             variable = unresolved.group(0)
             notes.append(f"{operation_id}: header {key!r} is not sent; {variable} is not a collection variable")
