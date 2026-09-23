@@ -20,6 +20,7 @@ FORM_TYPES = {"urlencoded": "application/x-www-form-urlencoded", "formdata": "mu
 _VARIABLE = re.compile(r"\{\{([^{}]+)\}\}")
 _COLON_SEGMENT = re.compile(r"(?<=/):([A-Za-z_][A-Za-z0-9_]*)")
 _PATH_PARAM = re.compile(r"\{([^{}/]+)\}")
+_PATH_START = re.compile(r"[/?]")  # where the path (or a bare query) begins after a host label
 UNSUPPORTED = Security(kind="unsupported")
 
 
@@ -132,26 +133,25 @@ def _substitute(text: str, variables: dict[str, str]) -> str:
 def _url(raw: Any, variables: dict[str, str]) -> tuple[str, str, list[tuple[str, str]], dict[str, str]] | None:
     """(origin, path with {params}, query pairs, path parameter examples) or None for an empty URL."""
     path_examples: dict[str, str] = {}
+    structured: list[tuple[str, str]] | None = None
     if isinstance(raw, dict):
         for variable in raw.get("variable") or []:
             if isinstance(variable, dict) and variable.get("key"):
                 path_examples[str(variable["key"])] = str(variable.get("value") or "")
+        entries = [q for q in raw.get("query") or [] if isinstance(q, dict) and q.get("key")]
+        if entries:
+            # Postman's own structured form of the query, the one that carries the `disabled` flags: the raw
+            # string keeps a switched-off entry, and where the two disagree the entries are what Postman sends.
+            structured = [_query_pair(q, variables) for q in entries if not q.get("disabled")]
         text = raw.get("raw")
         if not text:
             host = raw.get("host") or []
             host = ".".join(host) if isinstance(host, list) else str(host)
             path = raw.get("path") or []
             path = "/".join(path) if isinstance(path, list) else str(path)
-            pairs = [
-                f"{q.get('key')}={q.get('value', '')}"
-                for q in raw.get("query") or []
-                if isinstance(q, dict) and q.get("key") and not q.get("disabled")
-            ]
             protocol = raw.get("protocol")
             text = f"{protocol}://{host}" if protocol else host
             text = f"{text}/{path}" if path else text
-            if pairs:
-                text = f"{text}?{'&'.join(pairs)}"
     else:
         text = str(raw or "")
     text = _substitute(text.strip(), variables)
@@ -161,9 +161,12 @@ def _url(raw: Any, variables: dict[str, str]) -> tuple[str, str, list[tuple[str,
     leading_variable = _VARIABLE.match(text)
     if leading_variable:
         # An unresolved {{variable}} in host position (Postman's own {{baseUrl}}-style convention, usually
-        # supplied by an environment file this collection does not carry) is not a path parameter: drop it
-        # and leave the origin empty for the generated suite's own base URL to supply.
-        text = text[leading_variable.end() :]
+        # supplied by an environment file this collection does not carry) is not a path parameter: the whole
+        # label it starts - `{{env}}.api.example.com`, `{{host}}:8080`, `{{scheme}}://{{host}}` - is the origin,
+        # dropped as a whole and left for the generated suite's own base URL to supply.
+        rest = text[leading_variable.end() :]
+        boundary = _PATH_START.search(rest)
+        text = rest[boundary.start() :] if boundary else ""
         no_origin = True
     # Unknown {{name}} elsewhere becomes {name}: in the path that is a genuine parameter.
     text = _VARIABLE.sub(lambda m: "{" + m.group(1).strip() + "}", text)
@@ -176,8 +179,15 @@ def _url(raw: Any, variables: dict[str, str]) -> tuple[str, str, list[tuple[str,
     path = parts.path or "/"
     if not path.startswith("/"):
         path = "/" + path
-    query = parse_qsl(parts.query, keep_blank_values=True)
+    query = structured if structured is not None else parse_qsl(parts.query, keep_blank_values=True)
     return origin, path, query, path_examples
+
+
+def _query_pair(entry: dict[str, Any], variables: dict[str, str]) -> tuple[str, str]:
+    """One enabled `url.query` entry as (key, value): a null value is blank, and an unknown {{name}} becomes
+    {name}, as it does in a raw URL."""
+    value = _substitute(str(entry.get("value") or ""), variables)
+    return str(entry["key"]), _VARIABLE.sub(lambda m: "{" + m.group(1).strip() + "}", value)
 
 
 def _headers(raw: Any, variables: dict[str, str]) -> Iterator[Parameter]:

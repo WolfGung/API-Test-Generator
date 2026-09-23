@@ -272,3 +272,55 @@ def test_an_item_that_is_not_a_list_is_refused_naming_the_folder(tmp_path):
     path.write_text(json.dumps({"info": {"name": "F", "schema": v2_1}, "item": None}))
     with pytest.raises(SpecError, match="the collection's 'item' is not a list"):
         load_postman(path)
+
+
+def query_of(api):
+    return [(p.name, p.examples[0]) for p in api.operations[0].parameters_in("query")]
+
+
+def test_a_query_entry_marked_disabled_is_not_sent_even_when_the_raw_url_carries_it(tmp_path):
+    """Postman keeps a switched-off query entry in `url.query` with `disabled: true` and leaves it in `raw` as
+    well; the request Postman sends does not carry it, and neither must the generated one."""
+    api = _load_url(tmp_path, {
+        "raw": "https://api.example.com/things?verbose=true&debug=1",
+        "host": ["api", "example", "com"],
+        "path": ["things"],
+        "query": [{"key": "verbose", "value": "true"}, {"key": "debug", "value": "1", "disabled": True}],
+    })
+    assert query_of(api) == [("verbose", "true")]
+    assert api.operations[0].path == "/things"
+
+
+def test_when_raw_and_query_disagree_the_query_entries_decide_what_is_sent(tmp_path):
+    api = _load_url(tmp_path, {
+        "raw": "https://api.example.com/things?a=1",
+        "query": [{"key": "a", "value": "2"}, {"key": "b", "value": None}, {"key": "", "value": "ignored"}],
+    })
+    assert query_of(api) == [("a", "2"), ("b", "")]
+    only_disabled = _load_url(tmp_path, {
+        "raw": "https://api.example.com/things?debug=1",
+        "query": [{"key": "debug", "value": "1", "disabled": True}],
+    })
+    assert query_of(only_disabled) == []
+    from_raw = _load_url(tmp_path, {"raw": "https://api.example.com/things?a=1&b", "query": []})
+    assert query_of(from_raw) == [("a", "1"), ("b", "")]
+
+
+@pytest.mark.parametrize(
+    "url, path, query",
+    [
+        ("{{env}}.api.example.com/things/:id", "/things/{id}", []),
+        ("{{host}}:8080/things?x=1", "/things", [("x", "1")]),
+        ("{{scheme}}://{{host}}/things", "/things", []),
+        ("{{baseUrl}}?x=1", "/", [("x", "1")]),
+        ("{{env}}.api.example.com", "/", []),
+    ],
+)
+def test_an_unresolved_variable_leading_the_host_takes_the_whole_label_with_it(tmp_path, url, path, query):
+    """`{{env}}.api.example.com/things` names an origin the collection cannot resolve, not a path: the whole
+    label up to the path is left for the suite's base URL to supply, so no request goes to
+    `/.api.example.com/things`."""
+    api = _load_url(tmp_path, url)
+    assert api.base_url == ""
+    assert api.operations[0].path == path
+    assert query_of(api) == query
