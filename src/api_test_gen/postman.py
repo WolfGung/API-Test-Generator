@@ -173,16 +173,12 @@ def _url(raw: Any, variables: dict[str, str]) -> _Url | None:
         for variable in raw.get("variable") or []:
             if isinstance(variable, dict) and variable.get("key"):
                 path_examples[str(variable["key"])] = str(variable.get("value") or "")
-        entries = [q for q in raw.get("query") or [] if isinstance(q, dict) and q.get("key")]
+        entries = [q for q in raw.get("query") or [] if isinstance(q, dict) and q.get("key") is not None]
         if entries:
             # Postman's own structured form of the query, the one that carries the `disabled` flags: the raw
             # string keeps a switched-off entry, and where the two disagree the entries are what Postman sends.
-            # A null value is blank.
-            structured = [
-                (_substitute(str(q["key"]), variables), _substitute(str(q.get("value") or ""), variables))
-                for q in entries
-                if not q.get("disabled")
-            ]
+            # A null value is blank. The pairs are kept as the collection spelt them; `_query` substitutes.
+            structured = [(str(q["key"]), str(q.get("value") or "")) for q in entries if not q.get("disabled")]
         text = raw.get("raw")
         if not text:
             host = raw.get("host") or []
@@ -194,7 +190,8 @@ def _url(raw: Any, variables: dict[str, str]) -> _Url | None:
             text = f"{text}/{path}" if path else text
     else:
         text = str(raw or "")
-    text = _substitute(text.strip(), variables)
+    spelt = text.strip()
+    text = _substitute(spelt, variables)
     if not text:
         return None
     no_origin = False
@@ -234,44 +231,69 @@ def _url(raw: Any, variables: dict[str, str]) -> _Url | None:
     path = _VARIABLE.sub(lambda m: "{" + m.group(1).strip() + "}", parts.path or "/")
     if not path.startswith("/"):
         path = "/" + path
-    pairs = structured if structured is not None else parse_qsl(parts.query, keep_blank_values=True)
-    query = tuple(pair for pair in pairs if _query_pair_resolves(pair, notes))
+    if structured is None:
+        # The raw URL's query, pair by pair as the collection spelt it, so that a key or a value is substituted
+        # on its own - the same treatment the structured entries get.
+        structured = parse_qsl(urlsplit(spelt).query, keep_blank_values=True)
+    query = tuple(_query(structured, variables, notes))
     return _Url(origin=origin, path=path, query=query, path_examples=path_examples, notes=tuple(notes))
 
 
-def _query_pair_resolves(pair: tuple[str, str], notes: list[str]) -> bool:
-    """The header rule, for a query pair: a key or a value still holding a {{name}} the collection cannot
-    resolve is not sent at all - `{{trace}}` is never a query value, nor `{{k}}` a query key - and a note
-    says so."""
-    key, value = pair
-    unresolved = _VARIABLE.search(key) or _VARIABLE.search(value)
-    if unresolved is None:
-        return True
-    notes.append(f"query parameter {key!r} is not sent; {unresolved.group(0)} is not a collection variable")
-    return False
+def _query(
+    pairs: list[tuple[str, str]], variables: dict[str, str], notes: list[str]
+) -> Iterator[tuple[str, str]]:
+    """The query pairs the request sends, key and value substituted. The header rule: a pair whose key or value
+    still holds a {{name}} the collection cannot resolve is not sent at all - `{{trace}}` is never a query
+    value, nor `{{k}}` a query key - and one whose key comes out empty names no parameter; a note says so."""
+    for spelt_key, spelt_value in pairs:
+        key, value = _substitute(spelt_key, variables), _substitute(spelt_value, variables)
+        note = _empty_name("query parameter", spelt_key, key) or _unresolved("query parameter", key, key, value)
+        if note:
+            notes.append(note)
+            continue
+        yield key, value
+
+
+def _empty_name(kind: str, spelt: str, name: str) -> str | None:
+    """The note for a header or query parameter whose name is empty once substituted (`{{e}}` with `e` set to
+    "", or an empty key as written), or None when it has a name. `kind` is what the note calls it."""
+    return None if name else f"{kind} {spelt!r} is not sent; it resolves to an empty name"
+
+
+def _unresolved(kind: str, name: str, *texts: str) -> str | None:
+    """The note for a header or query parameter called `name` when one of `texts` (its name, its value) still
+    holds a {{name}} the collection cannot resolve, or None when all of them resolve. `kind` is what the note
+    calls it."""
+    for text in texts:
+        unresolved = _VARIABLE.search(text)
+        if unresolved is not None:
+            return f"{kind} {name!r} is not sent; {unresolved.group(0)} is not a collection variable"
+    return None
 
 
 def _headers(raw: Any, variables: dict[str, str], notes: list[str], operation_id: str) -> Iterator[Parameter]:
-    """The request's own headers, the ones the client fixture does not set. A key or a value still holding a
-    {{name}} the collection cannot resolve is not sent at all - `{{trace}}` is never a header value, nor `{{hk}}`
-    a header name - and a note says so."""
+    """The request's own headers, the ones the client fixture does not set. The query rule: a key or a value
+    still holding a {{name}} the collection cannot resolve is not sent at all - `{{trace}}` is never a header
+    value, nor `{{hk}}` a header name - and a key that comes out empty names no header; a note says so."""
     if isinstance(raw, str):
         entries = [
             {"key": k.strip(), "value": v.strip()}
-            for k, _, v in (line.partition(":") for line in raw.splitlines())
-            if k.strip()
+            for k, _, v in (line.partition(":") for line in raw.splitlines() if line.strip())
         ]
     else:
         entries = [h for h in raw or [] if isinstance(h, dict)]
     for entry in entries:
-        key = _substitute(str(entry.get("key") or ""), variables)
-        if not key or entry.get("disabled") or key.lower() in DROPPED_HEADERS:
+        if entry.get("disabled"):
             continue
+        spelt_key = str(entry.get("key") or "")
+        key = _substitute(spelt_key, variables)
         value = _substitute(str(entry.get("value", "")), variables)
-        unresolved = _VARIABLE.search(key) or _VARIABLE.search(value)
-        if unresolved:
-            variable = unresolved.group(0)
-            notes.append(f"{operation_id}: header {key!r} is not sent; {variable} is not a collection variable")
+        note = _empty_name("header", spelt_key, key)
+        if note is None and key.lower() in DROPPED_HEADERS:
+            continue
+        note = note or _unresolved("header", key, key, value)
+        if note:
+            notes.append(f"{operation_id}: {note}")
             continue
         yield Parameter(name=key, location="header", required=False, schema={"type": "string"}, examples=(value,))
 

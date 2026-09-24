@@ -330,7 +330,7 @@ def _load_items(tmp_path, items, auth=None, name="notes"):
     path = tmp_path / f"{name}.postman_collection.json"
     document = {
         "info": {"name": "Notes", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
-        "variable": [{"key": "known", "value": "resolved"}],
+        "variable": [{"key": "known", "value": "resolved"}, {"key": "empty", "value": ""}],
         "item": items,
     }
     if auth is not None:
@@ -551,3 +551,64 @@ def test_a_header_key_holding_an_unresolved_variable_is_dropped_with_a_note(tmp_
         "get_thing: header '{{hk}}' is not sent; {{hk}} is not a collection variable",
         "get_thing: header 'X-{{hk}}-{{other}}' is not sent; {{hk}} is not a collection variable",
     )
+
+
+def test_a_query_key_that_resolves_to_an_empty_name_is_dropped_with_a_note(tmp_path):
+    """A key that is a collection variable set to "" (`{{empty}}`), or an empty literal key (`=2`), names no
+    parameter: the pair is not sent and a note names the request and the key as the collection spelt it,
+    whether the pair comes from `url.query` or from the raw URL alone."""
+    empty_notes = (
+        "get_thing: query parameter '{{empty}}' is not sent; it resolves to an empty name",
+        "get_thing: query parameter '' is not sent; it resolves to an empty name",
+    )
+    structured = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {
+            "method": "GET",
+            "url": {
+                "raw": "https://api.example.com/things?{{empty}}=1&=2&x=3",
+                "query": [
+                    {"key": "{{empty}}", "value": "1"},
+                    {"key": "", "value": "2"},
+                    {"key": "x", "value": "3"},
+                ],
+            },
+        },
+    }], name="structured")
+    assert query_of(structured) == [("x", "3")]
+    assert structured.notes == empty_notes
+    raw = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {"method": "GET", "url": "https://api.example.com/things?{{empty}}=1&=2&x=3"},
+    }], name="raw")
+    assert query_of(raw) == [("x", "3")]
+    assert raw.notes == empty_notes
+
+
+def test_a_header_key_that_resolves_to_an_empty_name_is_dropped_with_a_note(tmp_path):
+    """The query rule, for a header: `{{empty}}: 1` and `: 2` name no header, so neither is sent and a note names
+    the request and the key as the collection spelt it - from the list form and from the string form alike."""
+    empty_notes = (
+        "get_thing: header '{{empty}}' is not sent; it resolves to an empty name",
+        "get_thing: header '' is not sent; it resolves to an empty name",
+    )
+    listed = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {
+            "method": "GET",
+            "url": "https://api.example.com/things",
+            "header": [{"key": "{{empty}}", "value": "1"}, {"key": "", "value": "2"}, {"key": "X-Plain", "value": "3"}],
+        },
+    }], name="listed")
+    assert [(p.name, p.examples[0]) for p in listed.operations[0].parameters_in("header")] == [("X-Plain", "3")]
+    assert listed.notes == empty_notes
+    spelt = _load_items(tmp_path, [{
+        "name": "Get Thing",
+        "request": {
+            "method": "GET",
+            "url": "https://api.example.com/things",
+            "header": "{{empty}}: 1\n: 2\n\nX-Plain: 3\n",
+        },
+    }], name="spelt")
+    assert [(p.name, p.examples[0]) for p in spelt.operations[0].parameters_in("header")] == [("X-Plain", "3")]
+    assert spelt.notes == empty_notes
