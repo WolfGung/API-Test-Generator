@@ -28,7 +28,7 @@ from tools.examples import EXAMPLES, REPO, Example, regenerate
 README = (REPO / "README.md").read_text(encoding="utf-8")
 SOURCE = REPO / "src" / "api_test_gen"
 CREDENTIALS = ("API_BASE_URL", "API_TOKEN", "API_KEY", "API_USERNAME", "API_PASSWORD")  # what a generated suite reads
-NUMBER_WORDS = {"one": 1, "two": 2, "both": 2, "three": 3, "four": 4, "five": 5}
+NUMBER_WORDS = {"one": 1, "two": 2, "both": 2, "three": 3, "four": 4, "five": 5, "six": 6}
 MOST_WORDS = 25  # what a sentence on the first screen may have at most
 
 
@@ -307,6 +307,7 @@ def test_the_related_work_links_are_the_other_repositories_of_the_portfolio():
         "Web-Scraping-Automation-Framework",
         "Test-Suite-Rescue",
         "Accessibility-Test-Automation-Framework",
+        "LLM-Evaluation-Framework",
     )
     for name in names:
         assert f"https://github.com/WolfGung/{name})" in README, name
