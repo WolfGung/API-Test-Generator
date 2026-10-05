@@ -179,22 +179,47 @@ def test_the_live_proof_is_described_as_the_live_test_runs_it():
     assert int(failing.group(1)) == min(test_live.NEED_THE_TOKEN.values()), "a suite without negatives skips those"
 
 
+def workflow(name: str) -> tuple[dict, dict]:
+    """A workflow under .github/workflows and its triggers; PyYAML reads the `on:` key as a boolean."""
+    loaded = yaml.safe_load((REPO / ".github" / "workflows" / name).read_text(encoding="utf-8"))
+    return loaded, loaded.get("on") or loaded[True]
+
+
 def test_the_ci_claims_match_the_workflow():
-    workflow = yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    triggers = workflow.get("on") or workflow[True]  # PyYAML reads the `on:` key as a boolean
-    assert "push" in triggers and "pull_request" in triggers, "the page says CI runs on every push"
-    crons = [entry["cron"] for entry in triggers["schedule"]]
-    assert len(crons) == 1 and re.fullmatch(r"\d+ \d+ \* \* \*", crons[0]), "once a night: one daily cron"
-    assert "workflow_dispatch" in triggers, "the page says the Petstore job can be started by hand"
-    jobs = workflow["jobs"]
-    assert {"lint", "test", "petstore-live"} <= set(jobs), "the jobs the page describes"
-    petstore = jobs["petstore-live"]
-    assert petstore["continue-on-error"] is True, "the page says the Petstore job is allowed to fail"
-    assert "schedule" in petstore["if"] and "workflow_dispatch" in petstore["if"], "nightly and by hand only"
-    pinned(r"runs the Petstore suite against `petstore3\.swagger\.io`", "the nightly Petstore run")
-    runs = [str(step.get("run", "")) for step in petstore["steps"]]
-    assert any("petstore3.swagger.io" in run for run in runs), "the Petstore job targets petstore3.swagger.io"
+    ci, triggers = workflow("ci.yml")
+    assert set(triggers) == {"push", "pull_request"}, "the page says CI runs on every push and pull request, only"
+    assert triggers["push"]["branches"] == ["main"], "the badge shows the push runs of main"
+    jobs = ci["jobs"]
+    assert set(jobs) == {"lint", "test"}, "the jobs the page describes"
+    for name, job in jobs.items():
+        assert job["runs-on"] == "ubuntu-24.04", f"{name}: a pinned runner image"
+        runs = " ".join(str(step.get("run", "")) for step in job["steps"])
+        assert "petstore3.swagger.io" not in runs, f"{name}: nothing in CI reaches the public Petstore"
     assert any("pytest" in str(step.get("run", "")) for step in jobs["test"]["steps"]), "the test job runs pytest"
+
+
+def test_the_petstore_run_is_by_hand_and_a_silent_server_is_a_notice():
+    live, triggers = workflow("petstore-live.yml")
+    pinned(
+        r"The Petstore suite runs against `petstore3\.swagger\.io` in a separate workflow, "
+        r"\[`petstore-live\.yml`\]\(\.github/workflows/petstore-live\.yml\), started by hand",
+        "the Petstore run by hand",
+    )
+    assert set(triggers) == {"workflow_dispatch"}, "the page says the Petstore run is started by hand, only"
+    petstore = live["jobs"]["petstore-live"]
+    assert petstore["runs-on"] == "ubuntu-24.04", "a pinned runner image"
+    assert petstore["continue-on-error"] is True, "the page says the Petstore job is allowed to fail"
+    probe, *rest = petstore["steps"]
+    assert probe["id"] == "probe" and "::notice" in probe["run"], "the page says a silent server is a notice"
+    pinned(r"the run skips the suite with a notice", "what a silent server does to the run")
+    for step in rest:
+        assert "steps.probe.outputs.reachable == 'true'" in step["if"], f"skipped when the server is silent: {step}"
+    runs = [str(step.get("run", "")) for step in rest]
+    assert any("petstore3.swagger.io" in run for run in runs), "the Petstore job targets petstore3.swagger.io"
+    assert any(run.startswith("pytest build/petstore") for run in runs), "the Petstore job runs the generated suite"
+    assert set((REPO / ".github" / "workflows").iterdir()) == {
+        REPO / ".github" / "workflows" / name for name in ("ci.yml", "petstore-live.yml")
+    }, "the two workflows the page names, and no other"
 
 
 def test_the_badges_point_at_this_repository_and_say_what_the_files_say():

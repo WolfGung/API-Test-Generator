@@ -21,7 +21,8 @@ api:
 	python3 -m uvicorn sample_api.app:app --port 8000
 
 # The Petstore suite against the public server. It is somebody else's data,
-# so a red here is information, not a verdict; CI runs it nightly the same way.
+# so a red here is information, not a verdict; the Petstore live workflow runs it
+# the same way when started by hand.
 petstore-live:
 	api-test-gen --spec fixtures/petstore-openapi3.json --out build/petstore --overwrite \
 		--base-url https://petstore3.swagger.io/api/v3

@@ -34,7 +34,7 @@ EXAMPLES = (
     ),
     Example(
         "petstore", "spec", "fixtures/petstore-openapi3.json", "https://petstore3.swagger.io/api/v3",
-        "petstore3.swagger.io, nightly",
+        "petstore3.swagger.io, by hand",
     ),
     Example(
         "postman_echo", "postman", "fixtures/postman-echo.postman_collection.json", None,

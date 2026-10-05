@@ -1,0 +1,53 @@
+name: Petstore live
+
+# The Petstore suite against the public server, started by hand only. It is somebody
+# else's shared writable data, so a red job here is information about the server, not a
+# verdict on the generator, and it never reaches the CI badge. When the server does not
+# answer, or answers a plain read with a server error, the run says so in a notice and
+# skips the suite instead of failing.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  petstore-live:
+    name: Petstore suite against petstore3.swagger.io (allowed to fail)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    env:
+      BASE_URL: https://petstore3.swagger.io/api/v3
+    steps:
+      - name: Check that petstore3.swagger.io answers
+        id: probe
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$BASE_URL/pet/findByStatus?status=available" || true)
+          if [ "$status" -ge 200 ] 2>/dev/null && [ "$status" -lt 500 ]; then
+            echo "reachable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Petstore unavailable::GET $BASE_URL/pet/findByStatus answered ${status:-nothing}; the Petstore suite is skipped"
+            echo "Skipped: petstore3.swagger.io answered ${status:-nothing} to a plain read." >> "$GITHUB_STEP_SUMMARY"
+            echo "reachable=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.probe.outputs.reachable == 'true'
+      - uses: actions/setup-python@v7
+        if: steps.probe.outputs.reachable == 'true'
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -e ".[dev]"
+        if: steps.probe.outputs.reachable == 'true'
+      - run: api-test-gen --spec fixtures/petstore-openapi3.json --out build/petstore --overwrite --base-url https://petstore3.swagger.io/api/v3
+        if: steps.probe.outputs.reachable == 'true'
+      - run: pytest build/petstore -q -p no:cacheprovider --junitxml=build/petstore-junit.xml
+        if: steps.probe.outputs.reachable == 'true'
+        env:
+          # The key the public Petstore documents for its own demo; not a secret.
+          API_KEY: special-key
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.probe.outputs.reachable == 'true'
+        with:
+          name: petstore-live
+          path: build/petstore-junit.xml

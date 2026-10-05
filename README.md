@@ -12,7 +12,7 @@ A command-line tool that turns an OpenAPI 3 document or a Postman collection int
 | --- | --- | --- | --- | --- | --- |
 | `sample_api/openapi.json` | OpenAPI 3.1 | 10 | 23 | 4 | the sample API, on every push |
 | `sample_api/bookshelf.postman_collection.json` | Postman v2.1 | 10 | 14 | 4 | the sample API, on every push |
-| `fixtures/petstore-openapi3.json` | OpenAPI 3.0 | 19 | 33 (1 skipped) | 3 | petstore3.swagger.io, nightly |
+| `fixtures/petstore-openapi3.json` | OpenAPI 3.0 | 19 | 33 (1 skipped) | 3 | petstore3.swagger.io, by hand |
 | `fixtures/postman-echo.postman_collection.json` | Postman v2.0 | 22 | 23 (1 skipped) | 7 | generated and collected only |
 
 ## What this shows
@@ -101,7 +101,7 @@ An operation with a form, multipart or binary body gets a test marked `skip`, wi
 
 `make test` runs the generator's own tests: the loaders against small documents and the two public ones, the model generator (the generated source is imported and used), the renderer, the command line, the committed examples against fresh generation, and then both sample-API suites as a client would run them. That last part is `pytest` in a subprocess against the sample API served in-process. Each suite runs three ways: with the token (everything passes), with a wrong token (exactly the 4 secured operations fail), without one (those 4 and their negatives are skipped). Nothing in `make test` reaches the network.
 
-CI does the same on every push, and once a night runs the Petstore suite against `petstore3.swagger.io`; the same job can be started by hand. That job is allowed to fail: the public Petstore is shared writable state, and a red there is information about the server, not about the generator.
+CI does the same on every push and pull request, and that run is the one the badge shows. The Petstore suite runs against `petstore3.swagger.io` in a separate workflow, [`petstore-live.yml`](.github/workflows/petstore-live.yml), started by hand; `make petstore-live` does the same locally. That job is allowed to fail: the public Petstore is shared writable state, and a red there is information about the server, not about the generator. When the server does not answer a plain read, or answers it with a server error, the run skips the suite with a notice.
 
 ```bash
 docker compose run --rm gen     # the sample API and its generated suite, in two containers

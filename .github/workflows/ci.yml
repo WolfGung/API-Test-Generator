@@ -4,9 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: "0 3 * * *"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -36,27 +33,3 @@ jobs:
         with: { python-version: "3.12", cache: pip }
       - run: pip install -e ".[dev]"
       - run: pytest -q
-
-  petstore-live:
-    # The Petstore suite against the public server: somebody else's data, so a red
-    # here is information, not a verdict on the generator. Nightly and on request.
-    name: Petstore suite against petstore3.swagger.io (allowed to fail)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12", cache: pip }
-      - run: pip install -e ".[dev]"
-      - run: api-test-gen --spec fixtures/petstore-openapi3.json --out build/petstore --overwrite --base-url https://petstore3.swagger.io/api/v3
-      - run: pytest build/petstore -q -p no:cacheprovider --junitxml=build/petstore-junit.xml
-        env:
-          # The key the public Petstore documents for its own demo; not a secret.
-          API_KEY: special-key
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: petstore-live
-          path: build/petstore-junit.xml
