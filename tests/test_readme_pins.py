@@ -199,8 +199,8 @@ def test_the_ci_claims_match_the_workflow():
 
 def test_the_badges_point_at_this_repository_and_say_what_the_files_say():
     pinned(
-        r"^\[!\[CI\]\((https://github\.com/WolfGung/API-Test-Generator/actions/workflows/ci\.yml)/badge\.svg\)\]"
-        r"\(\1\)$",
+        r"^\[!\[CI\]\((https://github\.com/WolfGung/API-Test-Generator/actions/workflows/ci\.yml)"
+        r"/badge\.svg\?branch=main&event=push\)\]\(\1\)$",
         "the CI badge",
     )
     assert (REPO / ".github" / "workflows" / "ci.yml").is_file(), "the workflow the CI badge points at"

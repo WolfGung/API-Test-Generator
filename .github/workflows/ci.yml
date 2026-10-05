@@ -14,7 +14,7 @@ permissions:
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -28,7 +28,7 @@ jobs:
     # and the generated sample-API suites against the sample API started in-process.
     # Nothing here reaches the network after pip.
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -41,7 +41,7 @@ jobs:
     # The Petstore suite against the public server: somebody else's data, so a red
     # here is information, not a verdict on the generator. Nightly and on request.
     name: Petstore suite against petstore3.swagger.io (allowed to fail)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     continue-on-error: true

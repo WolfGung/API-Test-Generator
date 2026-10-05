@@ -2,7 +2,7 @@
 
 A command-line tool that turns an OpenAPI 3 document or a Postman collection into a runnable pytest suite.
 
-[![CI](https://github.com/WolfGung/API-Test-Generator/actions/workflows/ci.yml/badge.svg)](https://github.com/WolfGung/API-Test-Generator/actions/workflows/ci.yml)
+[![CI](https://github.com/WolfGung/API-Test-Generator/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/WolfGung/API-Test-Generator/actions/workflows/ci.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
